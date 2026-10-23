@@ -1,4 +1,4 @@
-import { openExternalUrl, useHosts, useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
+import { openExternalUrl, useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
 import { SettingsInput } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,9 +12,8 @@ const AUDIT_KEY = ["mcp-proxy", "audit"];
 
 const AUTH_LABEL: Record<AuthType, string> = { none: "No authentication", "api-key": "API key", oauth: "OAuth" };
 
-export function McpProxyScreen({ theme, layout, host }: PluginScreenProps) {
+export function McpProxyScreen({ theme, layout }: PluginScreenProps) {
   const styles = useMemo(() => makeStyles(theme, layout.compact), [theme, layout.compact]);
-  const hosts = useHosts();
   const list = useRpc(listRpc);
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -29,7 +28,7 @@ export function McpProxyScreen({ theme, layout, host }: PluginScreenProps) {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{hosts.length > 1 && host.label ? `MCP Proxy · ${host.label}` : "MCP Proxy"}</Text>
+      <Text style={styles.title}>MCP Proxy</Text>
       <Text style={styles.muted}>
         Agents use these MCP servers without ever holding the keys or sign-ins. They are kept on this machine and never shown again.
       </Text>
