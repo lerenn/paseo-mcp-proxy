@@ -8,7 +8,7 @@ import { ProxyService } from "./server/service";
 import { SessionStore } from "./server/sessions";
 import { ServerStore } from "./server/store";
 import { Credentials } from "./server/upstream";
-import { CAPABILITY_ENV, SERVERS_ENV } from "./shared/plugin";
+import { CAPABILITY_ENV, parseServerList, requestedServers } from "./shared/plugin";
 import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "./shared/rpc";
 import { sourcesSettings, type GitSource } from "./shared/settings";
 import { sourceLabel } from "./server/git-sync";
@@ -18,6 +18,7 @@ const DEFAULT_PORT = 47824;
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(sourcesSettings);
   let sources: GitSource[] = [];
+  let defaultServers: string[] = [];
   const gitSources = new GitSources(undefined, undefined, undefined, () => registry.reload(sources));
   const registry = new GitRegistry((source) => gitSources.serversDir(source));
   const store = new ServerStore(registry);
@@ -32,13 +33,14 @@ export default function contribute(server: PluginServerContext) {
 
   // Servers defined in git are available as soon as the settings are read, from the last good clones;
   // the first fetch then refreshes them.
-  const apply = (next: GitSource[]) => {
+  const apply = (next: GitSource[], defaults = "") => {
+    defaultServers = parseServerList(defaults);
     sources = next;
     registry.reload(sources);
     gitSources.configure(sources);
   };
-  const loaded = settings.read().then((state) => apply(state.status === "ready" ? state.values.sources : []));
-  const unsubscribe = settings.subscribe((state) => apply(state.status === "ready" ? state.values.sources : []));
+  const loaded = settings.read().then((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : ""));
+  const unsubscribe = settings.subscribe((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : ""));
 
   // Resumed agents keep the URL they were created with, so the port has to be stable.
   const port = Number(process.env.MCP_PROXY_PORT ?? DEFAULT_PORT);
@@ -53,12 +55,14 @@ export default function contribute(server: PluginServerContext) {
   );
 
   const removeCreate = server.before("agent.create", async ({ request }) => {
-    // Agents that did not ask for servers are left exactly as they are.
-    if (!request.env?.[SERVERS_ENV]) return;
-    await Promise.all([started, loaded]);
+    // Agents that did not ask for servers, and have no default list, are left exactly as they are.
+    // Defaults are read with the settings, so wait for them before deciding.
+    await loaded;
+    if (!requestedServers(request.env, defaultServers).length) return;
+    await started;
     // Refuse rather than start an agent that silently lacks the servers its role depends on.
-    if (!url) throw new Error(`${startError} Create the agent without PASEO_MCP_SERVERS to skip MCP Proxy.`);
-    return attachServers(request, { url, registered: store.names(), capability: (granted) => sessions.create(granted) });
+    if (!url) throw new Error(`${startError} Create the agent with PASEO_MCP_SERVERS=none to skip MCP Proxy.`);
+    return attachServers(request, { url, defaults: defaultServers, registered: store.names(), capability: (granted) => sessions.create(granted) });
   });
   const removeOpen = server.before("agent.session_open", ({ request }) => {
     const capability = request.env[CAPABILITY_ENV];

@@ -2,7 +2,7 @@ MCP Proxy lets agents use remote MCP servers such as Linear, Sentry or Datadog w
 
 For OAuth servers, press Sign In in the screen. The browser opens, you approve once, and the daemon stores the refresh token in a file only its user can read. Access tokens are renewed automatically. Each server shows whether it is connected, needs a sign-in or has an error.
 
-An agent gets servers when it is created with `PASEO_MCP_SERVERS=linear,sentry` in its environment (or `*` for every registered server), so a role or script can ask for servers by name. Agents created without it are left untouched. Each agent can only reach the servers it was given.
+An agent gets servers when it is created with `PASEO_MCP_SERVERS=linear,sentry` in its environment (or `*` for every registered server), so a role or script can ask for servers by name. Agents created without it get the servers of the "Attach to every new agent by default" setting, which is empty unless you set it (`PASEO_MCP_SERVERS=none` opts an agent out). Each agent can only reach the servers it was given.
 
 The list of servers can live in a git repository, one small file per server with no secrets in it. Those servers are read-only in the screen and show where they come from; their keys and sign-ins are still set on the daemon.
 

@@ -28,10 +28,14 @@ export const gitSourceSchema = z.object({
 });
 export type GitSource = z.output<typeof gitSourceSchema>;
 
-/** Where the server registry is read from. Holds no secret: URLs and folders only. */
+/** Where the server registry is read from, and which servers new agents get. Holds no secret: URLs, folders and names only. */
 export const sourcesSettings = defineSettings({
   id: "sources",
   scope: "host",
   version: 1,
-  schema: z.object({ sources: z.array(gitSourceSchema).default([]) }),
+  schema: z.object({
+    sources: z.array(gitSourceSchema).default([]),
+    /** Registry names (comma or space separated) or `*` attached to every new agent that does not set PASEO_MCP_SERVERS. Empty: none. */
+    defaultServers: z.string().default(""),
+  }),
 });

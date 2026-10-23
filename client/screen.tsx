@@ -42,6 +42,7 @@ export function McpProxyScreen({ theme, layout }: PluginScreenProps) {
       {adding ? <AddForm styles={styles} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} /> : <Button styles={styles} label="Add Server" onPress={() => setAdding(true)} />}
 
       <Sources styles={styles} sources={query.data?.sources ?? []} problems={query.data?.problems ?? []} onChanged={reload} />
+      <DefaultServers styles={styles} />
       <Activity styles={styles} />
       <Text style={styles.muted}>
         Servers marked with a repository are defined in git and read-only here; only their keys and sign-ins are set here.
@@ -280,6 +281,37 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
             <Button styles={styles} small label="Add Source" onPress={() => setDrafts((list) => [...(list ?? []), { id: nextId.current++, url: "", ref: "", path: "", interval: String(DEFAULT_SYNC_MINUTES) }])} />
             <Button styles={styles} small primary label={settings.status === "ready" && settings.saving ? "Saving…" : "Save Sources"} onPress={save} />
             <Button styles={styles} small label={syncNow.isPending ? "Syncing…" : "Sync Now"} onPress={() => syncNow.mutate()} />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Servers every new agent gets without PASEO_MCP_SERVERS; the variable still overrides it, and `none` opts out. */
+function DefaultServers({ styles }: { styles: Styles }) {
+  const settings = useSettings(sourcesSettings);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (draft === null && settings.status === "ready") setDraft(settings.values.defaultServers);
+  }, [draft, settings]);
+  const current = settings.status === "ready" ? settings.values.defaultServers.trim() : "";
+  return (
+    <View style={styles.panel}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Attach to every new agent by default" onPress={() => setOpen((v) => !v)}>
+        <Text style={styles.heading}>{open ? "▾ Attach to every new agent by default" : "▸ Attach to every new agent by default"}{current ? ` (${current})` : ""}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.form}>
+          <Text style={styles.muted}>
+            Server names, comma separated, or * for every server. Leave empty to attach none. An agent created with PASEO_MCP_SERVERS uses that instead; PASEO_MCP_SERVERS=none opts it out.
+          </Text>
+          <SettingsInput label="Servers" initialValue={draft ?? ""} onChangeText={setDraft} placeholder="linear, sentry" />
+          {settings.status === "invalid" || settings.status === "error" ? <Text style={styles.error}>{settings.error}</Text> : null}
+          {settings.status === "ready" && settings.saveError ? <Text style={styles.error}>{settings.saveError}</Text> : null}
+          <View style={styles.actions}>
+            <Button styles={styles} small primary disabled={settings.status !== "ready" || draft === null} label={settings.status === "ready" && settings.saving ? "Saving…" : "Save"} onPress={() => { if (settings.status === "ready" && draft !== null) void settings.save({ ...settings.values, defaultServers: draft.trim() }, settings.revision); }} />
           </View>
         </View>
       ) : null}

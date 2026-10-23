@@ -12,4 +12,10 @@ describe("requestedServers", () => {
   it("keeps * as a name", () => {
     expect(requestedServers({ PASEO_MCP_SERVERS: "*" })).toEqual(["*"]);
   });
+  it("falls back to the defaults only when the variable is unset", () => {
+    expect(requestedServers({}, ["linear"])).toEqual(["linear"]);
+    expect(requestedServers({ PASEO_MCP_SERVERS: "sentry" }, ["linear"])).toEqual(["sentry"]);
+    expect(requestedServers({ PASEO_MCP_SERVERS: "" }, ["linear"])).toEqual([]);
+    expect(requestedServers({ PASEO_MCP_SERVERS: "none" }, ["linear"])).toEqual([]);
+  });
 });
