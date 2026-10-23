@@ -32,3 +32,27 @@ export const send = (res: ServerResponse, status: number, body: unknown, headers
   res.writeHead(status, { "content-type": "application/json", ...headers });
   res.end(JSON.stringify(body));
 };
+
+import { execFileSync } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+
+export const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, stdio: "pipe" }).toString();
+
+/** A bare origin whose `servers/` folder holds the given files on branch main, plus a clone to push changes from. */
+export async function makeOrigin(files: Record<string, string>) {
+  const bare = tmp();
+  git(bare, "init", "-q", "--bare", "-b", "main");
+  const work = tmp();
+  git(work, "clone", "-q", bare, ".");
+  git(work, "checkout", "-q", "-b", "main");
+  const commit = async (next: Record<string, string>, message: string) => {
+    await mkdir(path.join(work, "servers"), { recursive: true });
+    for (const [file, text] of Object.entries(next)) await writeFile(path.join(work, "servers", file), text);
+    git(work, "add", "-A");
+    git(work, "commit", "-q", "-m", message);
+    git(work, "push", "-q", "origin", "main");
+  };
+  await commit(files, "init");
+  return { bare, work, commit };
+}

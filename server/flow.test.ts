@@ -60,7 +60,7 @@ async function upstream(opts: { sse?: boolean; rejectFirst?: boolean } = {}) {
 
 async function setup(up: Awaited<ReturnType<typeof upstream>>) {
   const dir = tmp();
-  const store = new ServerStore(path.join(dir, "servers.json"));
+  const store = new ServerStore(null, path.join(dir, "servers.json"), path.join(dir, "secrets.json"));
   const sessions = new SessionStore(path.join(dir, "sessions.json"));
   const audit = new AuditLog(path.join(dir, "audit.jsonl"));
   const creds = new Credentials(store);
@@ -93,7 +93,7 @@ describe("OAuth sign-in", () => {
     expect(t.authUrl.searchParams.get("resource")).toBe(`${up.url}/mcp`);
     expect(t.cb.status).toBe(200);
     expect(t.service.views()[0]).toMatchObject({ name: "demo", auth: "oauth", status: "connected", signingIn: false });
-    expect(statSync(path.join(t.dir, "servers.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(path.join(t.dir, "secrets.json")).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(t.service.views())).not.toMatch(/at-1|rt-1/);
   });
 
