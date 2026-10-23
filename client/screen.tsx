@@ -281,11 +281,14 @@ function Activity({ styles }: { styles: Styles }) {
   const audit = useRpc(auditRpc);
   const query = useQuery({ queryKey: AUDIT_KEY, queryFn: () => audit({ limit: 20 }), refetchInterval: 10_000 });
   const entries = query.data?.entries ?? [];
+  const [open, setOpen] = useState(false);
   return (
     <View style={styles.panel}>
-      <Text style={styles.heading}>Recent Calls</Text>
-      {entries.length === 0 ? <Text style={styles.muted}>Nothing yet. Agents' calls appear here, without their contents.</Text> : null}
-      {entries.length ? <View style={styles.rows}>{entries.map((e, i) => <AuditRow key={`${e.at}-${i}`} entry={e} first={i === 0} styles={styles} />)}</View> : null}
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Recent Calls" onPress={() => setOpen((v) => !v)}>
+        <Text style={styles.heading}>{open ? "▾ Recent Calls" : "▸ Recent Calls"} ({entries.length})</Text>
+      </Pressable>
+      {open && entries.length === 0 ? <Text style={styles.muted}>Nothing yet. Agents' calls appear here, without their contents.</Text> : null}
+      {open && entries.length ? <View style={styles.rows}>{entries.map((e, i) => <AuditRow key={`${e.at}-${i}`} entry={e} first={i === 0} styles={styles} />)}</View> : null}
     </View>
   );
 }
