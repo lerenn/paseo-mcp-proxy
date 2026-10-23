@@ -8,9 +8,13 @@ Datadog.
 ## Design
 
 - Registry: named upstream MCP servers (`name`, `url`, auth). Auth is `none`, an API key sent in a
-  chosen header (default `Authorization: Bearer ...`), or OAuth 2.1.
-- Secrets: API keys are write-only. Neither they nor OAuth tokens are ever returned to the screen.
-  All state is under `~/.paseo/mcp-proxy/` (directory 0700, files 0600) on the daemon machine.
+  chosen header (default `Authorization: Bearer ...`), or OAuth 2.1. Definitions come from
+  [git sources](#git-sources) (read-only in the screen) and from servers added on the screen (kept in
+  `servers.json`, no secrets). If a name exists in both, git wins; with several sources the earlier wins.
+- Secrets: API keys, OAuth client secrets and refresh/access tokens are write-only and never in git or
+  in anything returned to the screen. They live in `~/.paseo/mcp-proxy/secrets.json`, keyed by server name
+  (directory 0700, files 0600). Secrets are tied to the URL they were obtained for: if git moves a name to
+  another URL, the old key or grant is ignored rather than sent there.
 - OAuth 2.1, per the MCP authorization spec: protected resource metadata (RFC 9728), authorization
   server metadata (RFC 8414 / OpenID, with the legacy `/authorize`, `/token`, `/register` fallback),
   dynamic client registration (RFC 7591, public client), PKCE `S256`, and the `resource` parameter
@@ -35,6 +39,33 @@ Datadog.
 - Audit: `~/.paseo/mcp-proxy/audit.jsonl` (0600, one rotation at 5 MB): time, server, JSON-RPC method,
   tool name (`tools/call` only), agent id, upstream status, duration, short error. No arguments, no
   results, no credentials. The screen shows the latest entries.
+
+## Git sources
+
+Keep the registry in a repository and let every daemon pick it up (infrastructure as code, like the Agent
+Roles plugin). Nothing is cloned until you add a source: on the screen, under **Git Sources**, set
+the repository URL (anything `git clone` accepts), an optional branch or tag, an optional folder and a
+sync interval (minutes, default 5). The plugin shallow-clones into `~/.paseo/mcp-proxy/git/` with the
+daemon's own `git` (SSH key or credential helper; never put a token in the URL, settings are not secret)
+and fetches on the interval and on **Sync Now**. A failed sync records the error and the last good copy
+keeps being served. Git-managed servers show the source as `owner/repo@ref` (`host/owner/repo@ref` outside
+GitHub) and are read-only: no remove, no notes editing. You still set their API key or press Sign In on the
+daemon, since those never belong in git.
+
+One file per server in the folder, named `<name>.yaml` (or `.yml`, `.json`):
+
+```yaml
+name: sentry               # must match the file name; lowercase letters, digits, dashes
+url: https://mcp.sentry.dev/mcp
+auth: api-key              # none | api-key | oauth
+header: X-Sentry-Key       # api-key only; default Authorization (sent as "Bearer <key>")
+instructions: |            # optional, added to what agents see
+  Use project web-app.
+```
+
+Unknown fields are rejected, so a `key:` or `token:` line makes the file invalid instead of being ignored;
+an invalid file is skipped and shown on the screen with the reason, and valid files still load. `http://` URLs
+are only accepted for localhost.
 
 ## Giving agents servers: the `PASEO_MCP_SERVERS` contract
 
@@ -70,7 +101,8 @@ a plugin-served HTTP route on the daemon would remove the manual step.
 | PR | Scope | State |
 | --- | --- | --- |
 | 1 | Skeleton, CI, docs | merged |
-| 2 | Registry, OAuth, proxy, agent attachment, audit, screen | in review |
+| 2 | Registry, OAuth, proxy, agent attachment, audit, screen | merged |
+| 3 | Git sources: the registry as files, secrets kept on the daemon | in review |
 
 ## Development
 

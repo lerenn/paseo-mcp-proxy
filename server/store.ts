@@ -1,6 +1,8 @@
 import path from "node:path";
-import { SERVER_NAME, type AuthType } from "../shared/server";
+import type { Definition } from "../shared/definition";
+import type { AuthType } from "../shared/server";
 import { home, readJson, writeJson } from "./files";
+import type { GitRegistry } from "./registry";
 
 /** OAuth 2.1 state for one server: the registered client, endpoints and the grant. Secret. */
 export interface OAuthState {
@@ -23,6 +25,7 @@ export type AuthConfig =
   | { type: "api-key"; header: string; prefix: string; key: string | null }
   | { type: "oauth"; oauth: OAuthState | null };
 
+/** A server as the proxy uses it: its definition plus the secrets kept for its name. */
 export interface ServerRecord {
   name: string;
   url: string;
@@ -30,80 +33,128 @@ export interface ServerRecord {
   auth: AuthConfig;
   /** Last failure to authenticate or reach the server; cleared on success. */
   lastError?: string | null;
+  /** Short git source label for servers defined in git (read-only); null for servers added on the screen. */
+  origin: string | null;
 }
 
-export const defaultServersPath = () => path.join(home(), "servers.json");
+/** What is kept on the daemon for a name. The URL it was obtained for guards against a redirected server. */
+interface Secrets {
+  url: string;
+  apiKey?: string;
+  prefix?: string;
+  oauth?: OAuthState;
+  lastError?: string | null;
+}
+
+export const defaultDefinitionsPath = () => path.join(home(), "servers.json");
+export const defaultSecretsPath = () => path.join(home(), "secrets.json");
 
 /**
- * The registry. Credentials live in the same file, mode 0600, and are handed only to the proxy:
- * nothing here is returned to the screen except through `view`.
+ * The registry. Definitions come from git sources (read-only, they win) and from servers added on
+ * the screen (`servers.json`, no secrets). Secrets live apart in `secrets.json` (mode 0600), keyed by
+ * server name, and are never part of a definition. Secrets saved for another URL are ignored, so
+ * pointing a name somewhere else never sends the old credentials there.
  */
 export class ServerStore {
-  constructor(private readonly file: string = defaultServersPath()) {}
+  constructor(
+    private readonly git: Pick<GitRegistry, "get" | "all"> | null = null,
+    private readonly definitionsFile: string = defaultDefinitionsPath(),
+    private readonly secretsFile: string = defaultSecretsPath(),
+  ) {}
 
-  private read(): Record<string, ServerRecord> {
-    return readJson(this.file, {});
+  private local(): Record<string, Definition> {
+    return readJson(this.definitionsFile, {});
+  }
+
+  private secrets(): Record<string, Secrets> {
+    return readJson(this.secretsFile, {});
+  }
+
+  private assemble(def: Definition, origin: string | null, secrets: Secrets | undefined): ServerRecord {
+    const mine = secrets && secrets.url === def.url ? secrets : undefined;
+    let auth: AuthConfig;
+    if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
+    else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
+    else auth = { type: "none" };
+    return { name: def.name, url: def.url, instructions: def.instructions ?? "", auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {
-    return Object.values(this.read()).sort((a, b) => a.name.localeCompare(b.name));
+    const secrets = this.secrets();
+    const byName = new Map<string, ServerRecord>();
+    for (const def of Object.values(this.local())) byName.set(def.name, this.assemble(def, null, secrets[def.name]));
+    for (const def of this.git?.all() ?? []) byName.set(def.name, this.assemble(def, def.origin, secrets[def.name]));
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   get(name: string): ServerRecord | null {
-    return this.read()[name.toLowerCase()] ?? null;
+    const key = name.toLowerCase();
+    const gitDef = this.git?.get(key);
+    if (gitDef) return this.assemble(gitDef, gitDef.origin, this.secrets()[key]);
+    const def = this.local()[key];
+    return def ? this.assemble(def, null, this.secrets()[key]) : null;
   }
 
   names(): string[] {
     return this.list().map((s) => s.name);
   }
 
-  /** Insert or replace a record. */
-  put(record: ServerRecord) {
-    writeJson(this.file, { ...this.read(), [record.name]: record });
+  /** Add a server on the screen. Refuses a name that exists, in git or locally. */
+  add(def: Definition, secrets: { apiKey?: string; prefix?: string } = {}) {
+    if (this.get(def.name)) throw new Error(`"${def.name}" already exists`);
+    writeJson(this.definitionsFile, { ...this.local(), [def.name]: def });
+    this.writeSecrets(def.name, { url: def.url, ...secrets });
   }
 
-  /** Change one record in place; no-op when it does not exist. */
+  /** Change a local server's notes. Git-managed servers are read-only. */
+  setInstructions(name: string, instructions: string) {
+    const record = this.require(name);
+    if (record.origin) throw new Error(`"${name}" is managed in git (${record.origin}) and is read-only here`);
+    writeJson(this.definitionsFile, { ...this.local(), [record.name]: { ...this.local()[record.name], instructions } });
+  }
+
+  /**
+   * Change the secrets and error state of a server (the part of a record that is not its
+   * definition). Definition fields in the returned record are ignored.
+   */
   update(name: string, change: (record: ServerRecord) => ServerRecord) {
-    const all = this.read();
-    const current = all[name.toLowerCase()];
+    const current = this.get(name);
     if (!current) return;
-    writeJson(this.file, { ...all, [current.name]: change(current) });
+    const next = change(current);
+    const secrets: Secrets = { url: current.url, lastError: next.lastError ?? null };
+    if (next.auth.type === "api-key") {
+      if (next.auth.key) secrets.apiKey = next.auth.key;
+      if (next.auth.prefix) secrets.prefix = next.auth.prefix;
+    } else if (next.auth.type === "oauth" && next.auth.oauth) secrets.oauth = next.auth.oauth;
+    const previous = this.secrets()[current.name];
+    // An unchanged error state must not rewrite the file on every request.
+    if (previous && JSON.stringify(previous) === JSON.stringify(secrets)) return;
+    this.writeSecrets(current.name, secrets);
   }
 
+  /** Remove a local server and its secrets. Git-managed servers are removed in git. */
   remove(name: string) {
-    const { [name.toLowerCase()]: _gone, ...rest } = this.read();
-    writeJson(this.file, rest);
+    const record = this.get(name);
+    if (record?.origin) throw new Error(`"${name}" is managed in git (${record.origin}); remove it there`);
+    const { [name.toLowerCase()]: _gone, ...rest } = this.local();
+    writeJson(this.definitionsFile, rest);
+    this.dropSecrets(name);
   }
-}
 
-export function validateName(name: string): string {
-  const clean = name.trim().toLowerCase();
-  if (!SERVER_NAME.test(clean)) throw new Error("Names are lowercase letters, digits and dashes, starting with a letter (32 characters at most)");
-  return clean;
-}
-
-/** Only http(s) URLs; plain http is allowed for loopback so local servers can be proxied too. */
-export function validateUrl(raw: string): string {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    throw new Error("Not a valid URL");
+  private writeSecrets(name: string, secrets: Secrets) {
+    writeJson(this.secretsFile, { ...this.secrets(), [name.toLowerCase()]: secrets });
   }
-  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) throw new Error("The URL must start with https:// (http:// is only accepted for localhost)");
-  if (url.username || url.password) throw new Error("Do not put credentials in the URL");
-  url.hash = "";
-  return url.toString();
-}
 
-const HEADER = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/;
+  private dropSecrets(name: string) {
+    const { [name.toLowerCase()]: _gone, ...rest } = this.secrets();
+    writeJson(this.secretsFile, rest);
+  }
 
-export function validateHeader(header: string): string {
-  const clean = header.trim();
-  if (!HEADER.test(clean)) throw new Error("Not a valid header name");
-  if (/^(host|content-type|content-length|accept|mcp-session-id|mcp-protocol-version|cookie)$/i.test(clean)) throw new Error(`${clean} cannot carry an API key`);
-  return clean;
+  private require(name: string): ServerRecord {
+    const record = this.get(name);
+    if (!record) throw new Error(`No server named "${name}"`);
+    return record;
+  }
 }
 
 export function authType(record: ServerRecord): AuthType {

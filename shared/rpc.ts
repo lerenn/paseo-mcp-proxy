@@ -1,11 +1,15 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { auditEntrySchema, authTypeSchema, serverViewSchema } from "./server";
+import { auditEntrySchema, authTypeSchema, problemSchema, serverViewSchema, sourceStatusSchema } from "./server";
 
 const listOutput = z.object({
   servers: z.array(serverViewSchema),
   /** Local address agents reach, or null when the port could not be bound. */
   endpoint: z.object({ url: z.string().nullable(), error: z.string().nullable() }),
+  /** Git sources and how their last sync went. */
+  sources: z.array(sourceStatusSchema),
+  /** Files in git sources that were skipped, with why. */
+  problems: z.array(problemSchema),
 });
 
 export const listRpc = defineRpc({ name: "mcp-proxy.list", input: z.object({}), output: listOutput });
@@ -69,3 +73,6 @@ export const auditRpc = defineRpc({
   input: z.object({ limit: z.number().int().min(1).max(500).default(50) }),
   output: z.object({ entries: z.array(auditEntrySchema) }),
 });
+
+/** Fetch every git source now. */
+export const syncRpc = defineRpc({ name: "mcp-proxy.sync", input: z.object({}), output: listOutput });

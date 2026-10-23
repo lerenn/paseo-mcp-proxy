@@ -4,6 +4,8 @@ For OAuth servers, press Sign In in the screen. The browser opens, you approve o
 
 An agent gets servers when it is created with `PASEO_MCP_SERVERS=linear,sentry` in its environment (or `*` for every registered server), so a role or script can ask for servers by name. Agents created without it are left untouched. Each agent can only reach the servers it was given.
 
+The list of servers can live in a git repository, one small file per server with no secrets in it. Those servers are read-only in the screen and show where they come from; their keys and sign-ins are still set on the daemon.
+
 Every call is written to an audit list with the server, tool, agent and outcome. Arguments and results are never recorded.
 
 ## Setup

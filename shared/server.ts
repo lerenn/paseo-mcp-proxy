@@ -23,6 +23,8 @@ export const serverViewSchema = z.object({
   detail: z.string().nullable(),
   /** A sign-in started from the screen is waiting for the browser. */
   signingIn: z.boolean(),
+  /** Short git source label (`owner/repo@ref`) for servers defined in git, which are read-only here; null otherwise. */
+  origin: z.string().nullable(),
 });
 export type ServerView = z.infer<typeof serverViewSchema>;
 
@@ -42,3 +44,17 @@ export const auditEntrySchema = z.object({
   error: z.string().nullable(),
 });
 export type AuditEntry = z.infer<typeof auditEntrySchema>;
+
+export const sourceStatusSchema = z.object({
+  /** `owner/repo@ref`. */
+  label: z.string(),
+  url: z.string(),
+  lastSync: z.string().nullable(),
+  error: z.string().nullable(),
+  syncing: z.boolean(),
+});
+export type SourceStatus = z.infer<typeof sourceStatusSchema>;
+
+/** A file in a git source that could not be used. */
+export const problemSchema = z.object({ origin: z.string(), file: z.string(), message: z.string() });
+export type ProblemView = z.infer<typeof problemSchema>;

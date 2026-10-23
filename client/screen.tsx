@@ -1,9 +1,11 @@
-import { openExternalUrl, useHosts, useRpc, type PluginScreenProps } from "@getpaseo/plugin/client";
+import { openExternalUrl, useHosts, useRpc, useSettings, type PluginScreenProps } from "@getpaseo/plugin/client";
+import { SettingsInput } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { addRpc, auditRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, testRpc } from "../shared/rpc";
-import type { AuditEntry, AuthType, ServerView } from "../shared/server";
+import { addRpc, auditRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "../shared/rpc";
+import { DEFAULT_SYNC_MINUTES, gitSourceSchema, sourcesSettings, type GitSource } from "../shared/settings";
+import type { AuditEntry, AuthType, ProblemView, ServerView, SourceStatus } from "../shared/server";
 
 const LIST_KEY = ["mcp-proxy", "list"];
 const AUDIT_KEY = ["mcp-proxy", "audit"];
@@ -27,7 +29,7 @@ export function McpProxyScreen({ theme, layout, host }: PluginScreenProps) {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{hosts.length > 1 ? `MCP Proxy · ${host.label}` : "MCP Proxy"}</Text>
+      <Text style={styles.title}>{hosts.length > 1 && host.label ? `MCP Proxy · ${host.label}` : "MCP Proxy"}</Text>
       <Text style={styles.muted}>
         Agents use these MCP servers without ever holding the keys or sign-ins. They are kept on this machine and never shown again.
       </Text>
@@ -40,8 +42,10 @@ export function McpProxyScreen({ theme, layout, host }: PluginScreenProps) {
       </View>
       {adding ? <AddForm styles={styles} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} /> : <Button styles={styles} label="Add Server" onPress={() => setAdding(true)} />}
 
+      <Sources styles={styles} sources={query.data?.sources ?? []} problems={query.data?.problems ?? []} onChanged={reload} />
       <Activity styles={styles} />
       <Text style={styles.muted}>
+        Servers marked with a repository are defined in git and read-only here; only their keys and sign-ins are set here.
         Give an agent a server by creating it with PASEO_MCP_SERVERS=name1,name2 (or *) in its environment.
         The proxy listens on {query.data?.endpoint.url ?? "no address"} on this machine only.
       </Text>
@@ -74,6 +78,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
           <View accessibilityLabel={`Status: ${statusText}`} style={[styles.dot, { backgroundColor: color }]} />
           <Text style={styles.name} numberOfLines={1}>{server.name}</Text>
           <Text style={styles.badge}>{AUTH_LABEL[server.auth]}</Text>
+          {server.origin ? <Text style={styles.badge} accessibilityLabel={`Defined in git: ${server.origin}`}>{server.origin}</Text> : null}
         </View>
         <View style={styles.actions}>
           {server.auth === "oauth" ? (
@@ -85,8 +90,8 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
           ) : null}
           {server.auth === "api-key" ? <Button styles={styles} small label="Replace Key" onPress={() => toggle("key")} /> : null}
           <Button styles={styles} small label="Test" onPress={() => run(async () => { const r = await test({ name: server.name }); setNote({ text: r.message, bad: !r.ok }); })} />
-          <Button styles={styles} small label="Notes" onPress={() => toggle("instructions")} />
-          <Button styles={styles} small label="Remove" onPress={() => run(() => remove({ name: server.name }))} />
+          {server.origin ? null : <Button styles={styles} small label="Notes" onPress={() => toggle("instructions")} />}
+          {server.origin ? null : <Button styles={styles} small label="Remove" onPress={() => run(() => remove({ name: server.name }))} />}
         </View>
       </View>
       <Text style={styles.muted} numberOfLines={1}>{server.url}</Text>
@@ -191,6 +196,84 @@ function AddForm({ styles, onCancel, onSaved }: { styles: Styles; onCancel(): vo
         <Button styles={styles} small primary disabled={!ready || save.isPending} label="Add" onPress={() => save.mutate()} />
         <Button styles={styles} small label="Cancel" onPress={onCancel} />
       </View>
+    </View>
+  );
+}
+
+type Draft = { id: number; url: string; ref: string; path: string; interval: string };
+
+function ago(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString() : "never";
+}
+
+/** Git sources hold the server registry as files; they are mirrored read-only with the daemon's own git credentials. */
+function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sources: SourceStatus[]; problems: ProblemView[]; onChanged(): void }) {
+  const settings = useSettings(sourcesSettings);
+  const sync = useRpc(syncRpc);
+  const nextId = useRef(0);
+  const [drafts, setDrafts] = useState<Draft[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const syncNow = useMutation({ mutationFn: () => sync({}), onSuccess: onChanged });
+
+  const toDrafts = (list: GitSource[]): Draft[] => list.map((s) => ({ id: nextId.current++, url: s.url, ref: s.ref ?? "", path: s.path ?? "", interval: String(s.intervalMinutes) }));
+  useEffect(() => {
+    if (drafts === null && settings.status === "ready") setDrafts(toDrafts(settings.values.sources));
+  }, [drafts, settings]);
+  const edit = (id: number, patch: Partial<Draft>) => setDrafts((list) => (list ?? []).map((d) => (d.id === id ? { ...d, ...patch } : d)));
+
+  async function save() {
+    if (settings.status !== "ready" || !drafts) return;
+    const parsed: GitSource[] = [];
+    for (const d of drafts) {
+      const result = gitSourceSchema.safeParse({ url: d.url, ref: d.ref.trim() || undefined, path: d.path.trim() || undefined, intervalMinutes: d.interval.trim() ? Number(d.interval) : DEFAULT_SYNC_MINUTES });
+      if (!result.success) return setError(`${d.url || "New source"}: ${result.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`);
+      parsed.push(result.data);
+    }
+    setError(null);
+    if (await settings.save({ ...settings.values, sources: parsed }, settings.revision)) {
+      setDrafts(null);
+      onChanged();
+    }
+  }
+
+  return (
+    <View style={styles.panel}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Git Sources" onPress={() => setOpen((v) => !v)}>
+        <Text style={styles.heading}>{open ? "▾ Git Sources" : "▸ Git Sources"}{sources.length ? ` (${sources.length})` : ""}</Text>
+      </Pressable>
+      {sources.map((s) => (
+        <Text key={`${s.url}-${s.label}`} style={s.error ? styles.error : styles.muted}>
+          {s.label}: {s.syncing ? "syncing…" : `synced ${ago(s.lastSync)}`}{s.error ? `. Last sync failed, using the previous copy: ${s.error}` : ""}
+        </Text>
+      ))}
+      {problems.map((p) => <Text key={`${p.origin}/${p.file}`} style={styles.error}>{p.origin} {p.file}: {p.message}</Text>)}
+      {open ? (
+        <View style={styles.form}>
+          <Text style={styles.muted}>
+            Each file in the folder defines one server: name, url, auth (none, api-key or oauth), optional header and instructions. Never put a key in it.
+            The repository is cloned with the daemon's own git credentials.
+          </Text>
+          {settings.status === "invalid" || settings.status === "error" ? <Text style={styles.error}>{settings.error}</Text> : null}
+          {(drafts ?? []).map((d) => (
+            <View key={d.id} style={styles.form}>
+              <SettingsInput label="Repository URL" initialValue={d.url} onChangeText={(url) => edit(d.id, { url })} placeholder="git@github.com:owner/repo.git" />
+              <SettingsInput label="Branch or tag (optional)" initialValue={d.ref} onChangeText={(ref) => edit(d.id, { ref })} placeholder="default branch" />
+              <SettingsInput label="Folder (optional)" initialValue={d.path} onChangeText={(path) => edit(d.id, { path })} placeholder="mcp-servers" />
+              <SettingsInput label="Sync interval (minutes)" initialValue={d.interval} onChangeText={(interval) => edit(d.id, { interval })} placeholder={String(DEFAULT_SYNC_MINUTES)} />
+              <Button styles={styles} small label="Remove Source" onPress={() => setDrafts((list) => (list ?? []).filter((x) => x.id !== d.id))} />
+            </View>
+          ))}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {settings.status === "ready" && settings.saveError ? <Text style={styles.error}>{settings.saveError}</Text> : null}
+          {syncNow.error ? <Text style={styles.error}>{(syncNow.error as Error).message}</Text> : null}
+          <View style={styles.actions}>
+            <Button styles={styles} small label="Add Source" onPress={() => setDrafts((list) => [...(list ?? []), { id: nextId.current++, url: "", ref: "", path: "", interval: String(DEFAULT_SYNC_MINUTES) }])} />
+            <Button styles={styles} small primary label={settings.status === "ready" && settings.saving ? "Saving…" : "Save Sources"} onPress={save} />
+            <Button styles={styles} small label={syncNow.isPending ? "Syncing…" : "Sync Now"} onPress={() => syncNow.mutate()} />
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }

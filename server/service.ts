@@ -3,7 +3,8 @@ import { randomBytes } from "node:crypto";
 import type { ServerView } from "../shared/server";
 import * as oauth from "./oauth";
 import { AuthRequired, type Credentials } from "./upstream";
-import { validateHeader, validateName, validateUrl, type ServerRecord, type ServerStore } from "./store";
+import type { ServerRecord, ServerStore } from "./store";
+import { validateHeader, validateName, validateUrl } from "./validate";
 
 const PENDING_TTL_MS = 10 * 60_000;
 
@@ -41,18 +42,12 @@ export class ProxyService {
 
   add(input: AddInput) {
     const name = validateName(input.name);
-    if (this.store.get(name)) throw new Error(`"${name}" already exists`);
     const url = validateUrl(input.url);
-    let auth: ServerRecord["auth"];
-    if (input.auth === "api-key") {
-      const key = input.apiKey?.trim() ?? "";
-      if (!key) throw new Error("The API key is empty");
-      if (/[\r\n]/.test(key)) throw new Error("Keys cannot contain line breaks");
-      // "Authorization" keys usually want the Bearer scheme; any other header carries the bare value.
-      const header = validateHeader(input.header?.trim() || "Authorization");
-      auth = { type: "api-key", header, prefix: header.toLowerCase() === "authorization" && !/^\w+\s/.test(key) ? "Bearer " : "", key };
-    } else auth = input.auth === "oauth" ? { type: "oauth", oauth: null } : { type: "none" };
-    this.store.put({ name, url, instructions: input.instructions?.trim() ?? "", auth, lastError: null });
+    const header = input.auth === "api-key" ? validateHeader(input.header?.trim() || "Authorization") : undefined;
+    const instructions = input.instructions?.trim() || undefined;
+    if (input.auth !== "api-key") return this.store.add({ name, url, auth: input.auth, instructions });
+    const key = cleanKey(input.apiKey);
+    this.store.add({ name, url, auth: "api-key", header, instructions }, { apiKey: key, prefix: prefixFor(header!, key) });
   }
 
   remove(name: string) {
@@ -60,19 +55,17 @@ export class ProxyService {
     for (const [state, p] of this.pending) if (p.name === name) this.pending.delete(state);
   }
 
+  /** Allowed for git-managed servers too: the definition is in git, the key never is. */
   setKey(name: string, apiKey: string) {
-    const key = apiKey.trim();
-    if (!key) throw new Error("The API key is empty");
-    if (/[\r\n]/.test(key)) throw new Error("Keys cannot contain line breaks");
+    const key = cleanKey(apiKey);
     const record = this.require(name);
     if (record.auth.type !== "api-key") throw new Error(`"${name}" does not use an API key`);
     const { header } = record.auth;
-    this.store.update(name, (r) => ({ ...r, lastError: null, auth: { type: "api-key", header, prefix: header.toLowerCase() === "authorization" && !/^\w+\s/.test(key) ? "Bearer " : "", key } }));
+    this.store.update(name, (r) => ({ ...r, lastError: null, auth: { type: "api-key", header, prefix: prefixFor(header, key), key } }));
   }
 
   setInstructions(name: string, instructions: string) {
-    this.require(name);
-    this.store.update(name, (r) => ({ ...r, instructions: instructions.trim() }));
+    this.store.setInstructions(name, instructions.trim());
   }
 
   signOut(name: string) {
@@ -194,6 +187,18 @@ export class ProxyService {
   }
 }
 
+/** "Authorization" keys usually want the Bearer scheme; any other header carries the bare value. */
+function prefixFor(header: string, key: string): string {
+  return header.toLowerCase() === "authorization" && !/^\w+\s/.test(key) ? "Bearer " : "";
+}
+
+function cleanKey(raw: string | undefined): string {
+  const key = raw?.trim() ?? "";
+  if (!key) throw new Error("The API key is empty");
+  if (/[\r\n]/.test(key)) throw new Error("Keys cannot contain line breaks");
+  return key;
+}
+
 export function view(r: ServerRecord, signingIn: boolean): ServerView {
   let status: ServerView["status"] = "connected";
   let detail: string | null = null;
@@ -216,5 +221,6 @@ export function view(r: ServerRecord, signingIn: boolean): ServerView {
     status,
     detail,
     signingIn,
+    origin: r.origin,
   };
 }
