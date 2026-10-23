@@ -1,0 +1,14 @@
+{
+  "id": "mcp-proxy",
+  "name": "MCP Proxy",
+  "description": "Use remote MCP servers from agents without giving them credentials: API keys and OAuth sign-ins stay on the daemon.",
+  "requirements": {
+    "paseo": ">=0.11.2"
+  },
+  "build": [
+    [
+      "npm",
+      "ci"
+    ]
+  ]
+}
