@@ -26,6 +26,8 @@ export interface AddInput {
 /** Backs the screen's RPCs: registry edits, OAuth sign-in and connection tests. */
 export class ProxyService {
   private readonly pending = new Map<string, Pending>();
+  /** States of flows that timed out, kept for a while so the error can say "expired" rather than "unknown". */
+  private readonly expired = new Map<string, number>();
 
   constructor(
     private readonly store: ServerStore,
@@ -110,7 +112,8 @@ export class ProxyService {
     this.sweep();
     const state = params.get("state") ?? "";
     const pending = this.pending.get(state);
-    if (!pending || (expectName && pending.name !== expectName)) return { ok: false, message: "This sign-in is unknown or expired. Start again from the MCP Proxy screen." };
+    if (!pending && this.expired.has(state)) return { ok: false, message: "This sign-in expired. Press Sign In again to start a new one." };
+    if (!pending || (expectName && pending.name !== expectName)) return { ok: false, message: "This address belongs to a different sign-in (state mismatch). Paste the address from the latest Sign In." };
     this.pending.delete(state);
     const error = params.get("error");
     if (error) return { ok: false, message: `The server refused the sign-in: ${params.get("error_description") ?? error}` };
@@ -131,15 +134,17 @@ export class ProxyService {
     }
   }
 
-  async completeSignIn(name: string, redirectUrl: string) {
-    let url: URL;
-    try {
-      url = new URL(redirectUrl.trim());
-    } catch {
-      throw new Error("That is not an address. Paste the whole address from the browser's address bar.");
-    }
-    const outcome = await this.finishSignIn(url.searchParams, validateName(name));
+  /** Accepts the full callback address or just its query string (`code=…&state=…`, with or without `?`). */
+  async completeSignIn(name: string, pasted: string) {
+    const params = parseCallback(pasted);
+    if (!params) throw new Error("That is not a callback address. Paste the whole address from the browser's address bar.");
+    const outcome = await this.finishSignIn(params, validateName(name));
     if (!outcome.ok) throw new Error(outcome.message);
+  }
+
+  /** Drop the pending flow of a server (the user cancelled). */
+  cancelSignIn(name: string) {
+    for (const [state, p] of this.pending) if (p.name === name) this.pending.delete(state);
   }
 
   /** Open an MCP session upstream with the stored credentials. */
@@ -183,8 +188,30 @@ export class ProxyService {
 
   private sweep() {
     const now = Date.now();
-    for (const [state, p] of this.pending) if (p.expires < now) this.pending.delete(state);
+    for (const [state, p] of this.pending) {
+      if (p.expires >= now) continue;
+      this.pending.delete(state);
+      this.expired.set(state, now);
+    }
+    for (const [state, at] of this.expired) if (now - at > 60 * 60_000) this.expired.delete(state);
   }
+}
+
+/** Callback parameters from a pasted full address or bare query string; null if it is neither. */
+export function parseCallback(raw: string): URLSearchParams | null {
+  const text = raw.trim();
+  let query: string;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    try {
+      query = new URL(text).search;
+    } catch {
+      return null;
+    }
+  } else {
+    query = text.replace(/^[^?=&]*\?/, "");
+  }
+  const params = new URLSearchParams(query.replace(/^\?/, "").replace(/#.*$/, ""));
+  return params.has("state") && (params.has("code") || params.has("error")) ? params : null;
 }
 
 /** "Authorization" keys usually want the Bearer scheme; any other header carries the bare value. */

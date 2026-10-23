@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuditLog } from "./audit";
 import { ProxyHttp } from "./proxy";
 import { ProxyService } from "./service";
@@ -115,6 +115,49 @@ describe("OAuth sign-in", () => {
     await fetch(authUrl);
     await t.service.completeSignIn("demo", `http://127.0.0.1:1/oauth/callback?code=the-code&state=${authUrl.searchParams.get("state")}`);
     expect(t.service.views()[0].status).toBe("connected");
+  });
+});
+
+describe("pasted callback", () => {
+  async function pending() {
+    const up = await upstream();
+    const t = await setup(up);
+    t.service.add({ name: "demo", url: `${up.url}/mcp`, auth: "oauth" });
+    const authUrl = new URL(await t.service.signIn("demo"));
+    await fetch(authUrl);
+    return { ...t, state: authUrl.searchParams.get("state")! };
+  }
+
+  it("accepts a bare query string, with or without the question mark", async () => {
+    const t = await pending();
+    await t.service.completeSignIn("demo", `?code=the-code&state=${t.state}`);
+    expect(t.service.views()[0].status).toBe("connected");
+    const u = await pending();
+    await u.service.completeSignIn("demo", `code=the-code&state=${u.state}`);
+    expect(u.service.views()[0].status).toBe("connected");
+  });
+
+  it("reports a state mismatch without ending the pending sign-in or echoing the code", async () => {
+    const t = await pending();
+    const err = await t.service.completeSignIn("demo", "http://127.0.0.1:1/oauth/callback?code=secret-code&state=forged").catch((e: Error) => e);
+    expect((err as Error).message).toContain("state mismatch");
+    expect((err as Error).message).not.toContain("secret-code");
+    expect(t.service.views()[0].signingIn).toBe(true);
+  });
+
+  it("reports an expired flow and rejects text that is not a callback", async () => {
+    const t = await pending();
+    const now = Date.now();
+    const spy = vi.spyOn(Date, "now").mockReturnValue(now + 11 * 60_000);
+    await expect(t.service.completeSignIn("demo", `?code=the-code&state=${t.state}`)).rejects.toThrow(/expired/);
+    spy.mockRestore();
+    await expect(t.service.completeSignIn("demo", "hello")).rejects.toThrow(/not a callback address/);
+  });
+
+  it("drops the pending flow on cancel", async () => {
+    const t = await pending();
+    t.service.cancelSignIn("demo");
+    expect(t.service.views()[0].signingIn).toBe(false);
   });
 });
 
