@@ -9,6 +9,13 @@ const on = new Map<string, Handler>();
 const rpcs = new Map<string, Handler>();
 let cleanup: () => Promise<void> | void;
 let home: string;
+let defaultServers = "";
+const listeners = new Set<(state: unknown) => void>();
+const settingsState = () => ({ status: "ready", revision: "1", values: { sources: [], defaultServers } });
+const setDefaults = (value: string) => {
+  defaultServers = value;
+  for (const l of listeners) l(settingsState());
+};
 
 beforeAll(async () => {
   home = tmp();
@@ -18,7 +25,7 @@ beforeAll(async () => {
   cleanup = contribute({
     before: (name: string, h: Handler) => (before.set(name, h), () => before.delete(name)),
     on: (name: string, h: Handler) => (on.set(name, h), () => on.delete(name)),
-    registerSettings: () => ({ read: async () => ({ status: "ready", revision: "1", values: { sources: [] } }), subscribe: () => () => {} }),
+    registerSettings: () => ({ read: async () => settingsState(), subscribe: (l: (state: unknown) => void) => (listeners.add(l), () => listeners.delete(l)) }),
     handle: (contract: { name: string }, h: Handler) => void rpcs.set(contract.name, h),
   } as never) as () => Promise<void>;
 });
@@ -65,5 +72,32 @@ describe("plugin wiring", () => {
     expect(out.endpoint.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(out.servers.map((s: { name: string }) => s.name)).toEqual(["keyed", "linear", "sentry"]);
     expect(JSON.stringify(out)).not.toContain("sk-hidden");
+  });
+
+  describe("attach by default", () => {
+    it("attaches the default servers to agents that set nothing, keeping same-named entries replaced", async () => {
+      setDefaults("Linear");
+      const out = await create({ KEEP: "1" }, { mcpServers: { linear: { type: "http", url: "https://direct.example/mcp" }, other: { type: "http", url: "https://o.example/mcp" } } });
+      expect(Object.keys(out.config.mcpServers).sort()).toEqual(["linear", "other"]);
+      expect(out.config.mcpServers.linear.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/s\/linear\/mcp$/);
+      expect(out.config.mcpServers.other.url).toBe("https://o.example/mcp");
+      expect(out.env.PASEO_MCP_PROXY_CAPABILITY).toBeTruthy();
+    });
+
+    it("lets PASEO_MCP_SERVERS override the defaults, and an empty value or none opt out", async () => {
+      setDefaults("linear");
+      const sentryOnly = await create({ PASEO_MCP_SERVERS: "sentry" });
+      expect(Object.keys(sentryOnly.config.mcpServers)).toEqual(["sentry"]);
+      expect(await create({ PASEO_MCP_SERVERS: "" })).toBeUndefined();
+      expect(await create({ PASEO_MCP_SERVERS: "none" })).toBeUndefined();
+      expect(await create({ PASEO_MCP_SERVERS: " None " })).toBeUndefined();
+    });
+
+    it("supports * as the default and goes back to untouched when cleared", async () => {
+      setDefaults("*");
+      expect(Object.keys((await create({})).config.mcpServers).sort()).toEqual(["keyed", "linear", "sentry"]);
+      setDefaults("");
+      expect(await create({})).toBeUndefined();
+    });
   });
 });

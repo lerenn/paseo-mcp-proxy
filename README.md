@@ -77,7 +77,10 @@ PASEO_MCP_SERVERS=linear,sentry     # registry names, comma or space separated, 
 PASEO_MCP_SERVERS=*                 # every server registered now or later
 ```
 
-- Unset or empty: the agent is left exactly as it is.
+- Unset: the agent gets the servers listed in the **Attach to every new agent by default** setting
+  (names or `*`; empty by default, so the agent is left exactly as it is).
+- Set to an empty value or `none`: the agent gets no proxied servers, whatever the default says.
+- Set to names or `*`: that list replaces the default for this agent.
 - Each name that is registered becomes an HTTP MCP server of that name in the agent's config
   (replacing a same-named entry), with the capability as its bearer. The system prompt gets a line
   listing them.

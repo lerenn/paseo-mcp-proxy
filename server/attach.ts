@@ -7,6 +7,8 @@ type McpServers = NonNullable<CreateRequest["config"]["mcpServers"]>;
 export interface AttachOptions {
   /** Base URL of the local proxy endpoint, no trailing slash. */
   url: string;
+  /** Servers every new agent gets unless its own PASEO_MCP_SERVERS says otherwise. */
+  defaults?: string[];
   /** Names currently in the registry. */
   registered: string[];
   /** Mints the agent's capability for the servers it is granted. */
@@ -14,12 +16,12 @@ export interface AttachOptions {
 }
 
 /**
- * Give a new agent the proxied servers it asked for with PASEO_MCP_SERVERS. Returns undefined when
- * it asked for none, so other agents stay exactly as they are. Names that are not registered are
+ * Give a new agent the proxied servers it asked for with PASEO_MCP_SERVERS, or the default list when
+ * it did not set the variable. Returns undefined when there are none, so other agents stay exactly as they are. Names that are not registered are
  * not an error: they are listed in a note so the agent can tell the user.
  */
 export function attachServers(request: CreateRequest, o: AttachOptions): CreateRequest | undefined {
-  const asked = requestedServers(request.env);
+  const asked = requestedServers(request.env, o.defaults);
   if (!asked.length) return undefined;
   const granted = asked.includes(ALL) ? [...o.registered] : asked.filter((n) => o.registered.includes(n));
   const missing = asked.filter((n) => n !== ALL && !o.registered.includes(n));
