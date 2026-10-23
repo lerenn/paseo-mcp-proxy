@@ -69,7 +69,7 @@ are only accepted for localhost.
 
 ## Giving agents servers: the `PASEO_MCP_SERVERS` contract
 
-Other plugins (for example agent-roles) do not import this one. They set one variable in the agent's
+Other plugins (for example agents-roles) do not import this one. They set one variable in the agent's
 environment when they create it:
 
 ```

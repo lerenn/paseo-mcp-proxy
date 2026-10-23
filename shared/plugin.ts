@@ -1,5 +1,5 @@
 /**
- * The convention other plugins (for example agent-roles) rely on, without importing this one:
+ * The convention other plugins (for example agents-roles) rely on, without importing this one:
  * set `PASEO_MCP_SERVERS` in an agent's environment at creation to a comma-separated list of
  * registry names, or `*` for every registered server.
  */
