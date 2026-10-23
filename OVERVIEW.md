@@ -10,7 +10,7 @@ Every call is written to an audit list with the server, tool, agent and outcome.
 
 ## Setup
 
-Open the MCP Proxy screen and choose Add Server. Give it a short name and the server's URL, then pick how it authenticates. API keys are write-only: the screen never shows them again. For OAuth, press Sign In on the new row. If your browser runs on a different machine from the daemon, the sign-in page fails to load at the end; copy its address and paste it with Paste Address.
+Open the MCP Proxy screen and choose Add Server. Give it a short name and the server's URL, then pick how it authenticates. API keys are write-only: the screen never shows them again. For OAuth, press Sign In on the new row: the browser opens and the row asks for the callback address. If your browser runs on a different machine from the daemon, the sign-in page fails to load at the end; copy its address and paste it into the field (it finishes on its own). If the browser does reach the daemon, the row completes by itself.
 
 ## Limits
 

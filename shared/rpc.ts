@@ -51,13 +51,16 @@ export const signInRpc = defineRpc({
 
 /**
  * Finish a sign-in whose browser could not reach the daemon's callback (a remote daemon): the user
- * pastes the address the browser ended on.
+ * pastes the address (or its query string) the browser ended on.
  */
 export const completeSignInRpc = defineRpc({
   name: "mcp-proxy.complete-sign-in",
   input: z.object({ name: z.string(), redirectUrl: z.string() }),
   output: z.object({}),
 });
+
+/** Abandon the sign-in in progress for a server. */
+export const cancelSignInRpc = defineRpc({ name: "mcp-proxy.cancel-sign-in", input: z.object({ name: z.string() }), output: z.object({}) });
 
 export const signOutRpc = defineRpc({ name: "mcp-proxy.sign-out", input: z.object({ name: z.string() }), output: z.object({}) });
 

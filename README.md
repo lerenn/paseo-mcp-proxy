@@ -93,7 +93,7 @@ PASEO_MCP_SERVERS=*                 # every server registered now or later
 The authorization request uses `redirect_uri=http://127.0.0.1:47824/oauth/callback`, served by the
 daemon. That works when the browser that opens runs on the daemon machine. When the daemon is remote
 (the browser's `127.0.0.1` is another machine), the page fails to load after approval; copy its address
-and paste it into Paste Address in the screen, which finishes the exchange. No Paseo change is needed;
+and paste it into the field Sign In shows (a full address or just its query string); it finishes the exchange as soon as it is pasted. No Paseo change is needed;
 a plugin-served HTTP route on the daemon would remove the manual step.
 
 ## Status

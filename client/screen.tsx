@@ -3,7 +3,7 @@ import { SettingsInput } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { addRpc, auditRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "../shared/rpc";
+import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "../shared/rpc";
 import { DEFAULT_SYNC_MINUTES, gitSourceSchema, sourcesSettings, type GitSource } from "../shared/settings";
 import type { AuditEntry, AuthType, ProblemView, ServerView, SourceStatus } from "../shared/server";
 
@@ -63,10 +63,10 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
   const signOut = useRpc(signOutRpc);
   const remove = useRpc(removeRpc);
   const test = useRpc(testRpc);
-  const [panel, setPanel] = useState<"key" | "paste" | "instructions" | null>(null);
+  const [panel, setPanel] = useState<"key" | "instructions" | null>(null);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
   const run = (fn: () => Promise<unknown>) => fn().then(onChanged, (e) => setNote({ text: (e as Error).message, bad: true }));
-  const toggle = (p: "key" | "paste" | "instructions") => setPanel((cur) => (cur === p ? null : p));
+  const toggle = (p: "key" | "instructions") => setPanel((cur) => (cur === p ? null : p));
   const color = statusColor(server.status, theme);
   const statusText = server.status === "connected" ? "Connected" : server.status === "error" ? "Error" : server.auth === "api-key" ? "Needs Key" : "Needs Sign-In";
 
@@ -82,8 +82,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
         <View style={styles.actions}>
           {server.auth === "oauth" ? (
             <>
-              <Button styles={styles} small primary={server.status === "needs-sign-in"} label={server.status === "needs-sign-in" ? "Sign In" : "Sign In Again"} onPress={() => run(async () => { setNote(null); const { url } = await signIn({ name: server.name }); await openExternalUrl(url); setNote({ text: "Finish in your browser. If it cannot reach this machine, use Paste Address.", bad: false }); })} />
-              <Button styles={styles} small label="Paste Address" onPress={() => toggle("paste")} />
+              <Button styles={styles} small primary={server.status === "needs-sign-in"} label={server.status === "needs-sign-in" ? "Sign In" : "Sign In Again"} onPress={() => run(async () => { setNote(null); const { url } = await signIn({ name: server.name }); await openExternalUrl(url); })} />
               {server.status !== "needs-sign-in" ? <Button styles={styles} small label="Sign Out" onPress={() => run(() => signOut({ name: server.name }))} /> : null}
             </>
           ) : null}
@@ -97,7 +96,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
       {server.detail ? <Text style={styles.error}>{server.detail}</Text> : null}
       {note ? <Text style={note.bad ? styles.error : styles.muted}>{note.text}</Text> : null}
       {panel === "key" ? <KeyForm styles={styles} name={server.name} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
-      {panel === "paste" ? <PasteForm styles={styles} name={server.name} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
+      {server.auth === "oauth" && server.signingIn ? <PasteForm styles={styles} name={server.name} onDone={() => { setNote(null); onChanged(); }} onCancel={() => { setNote(null); onChanged(); }} onError={(text) => setNote({ text, bad: true })} /> : null}
       {panel === "instructions" ? <InstructionsForm styles={styles} server={server} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
     </View>
   );
@@ -120,22 +119,33 @@ function KeyForm({ styles, name, onDone, onCancel }: { styles: Styles; name: str
   );
 }
 
-/** For a daemon the browser cannot reach: the address the browser ended on carries the code. */
-function PasteForm({ styles, name, onDone, onCancel }: { styles: Styles; name: string; onDone(): void; onCancel(): void }) {
+/** Shown while a sign-in is pending: the browser may be on another machine than the daemon, so the callback address is pasted here. */
+function PasteForm({ styles, name, onDone, onCancel, onError }: { styles: Styles; name: string; onDone(): void; onCancel(): void; onError(text: string): void }) {
   const complete = useRpc(completeSignInRpc);
+  const cancel = useRpc(cancelSignInRpc);
   const [url, setUrl] = useState("");
-  const save = useMutation({ mutationFn: () => complete({ name, redirectUrl: url }), onSuccess: onDone });
+  const submit = useMutation({ mutationFn: (value: string) => complete({ name, redirectUrl: value }), onSuccess: () => { setUrl(""); onDone(); }, onError: (e) => onError((e as Error).message) });
+  const abort = useMutation({ mutationFn: () => cancel({ name }), onSuccess: () => { setUrl(""); onCancel(); } });
+  const change = (value: string) => {
+    setUrl(value);
+    if (!submit.isPending && looksLikeCallback(value)) submit.mutate(value);
+  };
   return (
     <View style={styles.form}>
-      <Text style={styles.muted}>After approving in the browser, the page may fail to load. Copy its full address (it starts with http://127.0.0.1) and paste it here.</Text>
-      <TextInput style={styles.input} value={url} onChangeText={setUrl} placeholder="http://127.0.0.1:47824/oauth/callback?code=…" placeholderTextColor={styles.placeholder.color} autoCapitalize="none" autoCorrect={false} accessibilityLabel="Address the browser ended on" />
-      {save.error ? <Text style={styles.error}>{(save.error as Error).message}</Text> : null}
+      <Text style={styles.muted}>After approving, the page may fail to load. Copy its full address (it starts with http://127.0.0.1) and paste it here.</Text>
+      <TextInput style={styles.input} value={url} onChangeText={change} placeholder="http://127.0.0.1:47824/oauth/callback?code=…" placeholderTextColor={styles.placeholder.color} autoCapitalize="none" autoCorrect={false} accessibilityLabel="Address the browser ended on" />
+      {submit.error ? <Text style={styles.error}>{(submit.error as Error).message}</Text> : null}
       <View style={styles.actions}>
-        <Button styles={styles} small primary disabled={!url.trim() || save.isPending} label={save.isPending ? "Finishing…" : "Finish Sign-In"} onPress={() => save.mutate()} />
-        <Button styles={styles} small label="Cancel" onPress={onCancel} />
+        <Button styles={styles} small primary disabled={!url.trim() || submit.isPending} label={submit.isPending ? "Finishing…" : "Finish Sign-In"} onPress={() => submit.mutate(url)} />
+        <Button styles={styles} small label="Cancel" onPress={() => abort.mutate()} />
       </View>
     </View>
   );
+}
+
+/** A full callback address or bare query string: it has a state and a code (or an error), so it can be submitted without a click. */
+function looksLikeCallback(value: string): boolean {
+  return /(^|[?&\s])state=[^&\s]+/.test(value) && /(^|[?&\s])(code|error)=[^&\s]+/.test(value);
 }
 
 /** Text added to what the server tells agents about itself. */
