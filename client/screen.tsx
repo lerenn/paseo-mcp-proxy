@@ -41,8 +41,7 @@ export function McpProxyScreen({ theme, layout }: PluginScreenProps) {
       </View>
       {adding ? <AddForm styles={styles} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} /> : <Button styles={styles} label="Add Server" onPress={() => setAdding(true)} />}
 
-      <Sources styles={styles} sources={query.data?.sources ?? []} problems={query.data?.problems ?? []} onChanged={reload} />
-      <DefaultServers styles={styles} />
+      <SettingsSection styles={styles} sources={query.data?.sources ?? []} problems={query.data?.problems ?? []} onChanged={reload} />
       <Activity styles={styles} />
       <Text style={styles.muted}>
         Servers marked with a repository are defined in git and read-only here; only their keys and sign-ins are set here.
@@ -216,6 +215,24 @@ function ago(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : "never";
 }
 
+/** Everything about where servers come from and how agents get them; closed by default so it stays out of the server list. */
+function SettingsSection({ styles, sources, problems, onChanged }: { styles: Styles; sources: SourceStatus[]; problems: ProblemView[]; onChanged(): void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.panel}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Settings" onPress={() => setOpen((v) => !v)}>
+        <Text style={styles.heading}>{open ? "▾ Settings" : "▸ Settings"}</Text>
+      </Pressable>
+      {open ? (
+        <>
+          <Sources styles={styles} sources={sources} problems={problems} onChanged={onChanged} />
+          <DefaultServers styles={styles} />
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 /** Git sources hold the server registry as files; they are mirrored read-only with the daemon's own git credentials. */
 function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sources: SourceStatus[]; problems: ProblemView[]; onChanged(): void }) {
   const settings = useSettings(sourcesSettings);
@@ -223,7 +240,6 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
   const nextId = useRef(0);
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const syncNow = useMutation({ mutationFn: () => sync({}), onSuccess: onChanged });
 
   const toDrafts = (list: GitSource[]): Draft[] => list.map((s) => ({ id: nextId.current++, url: s.url, ref: s.ref ?? "", path: s.path ?? "", interval: String(s.intervalMinutes) }));
@@ -248,17 +264,15 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
   }
 
   return (
-    <View style={styles.panel}>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Git Sources" onPress={() => setOpen((v) => !v)}>
-        <Text style={styles.heading}>{open ? "▾ Git Sources" : "▸ Git Sources"}{sources.length ? ` (${sources.length})` : ""}</Text>
-      </Pressable>
+    <View style={styles.form}>
+      <Text style={styles.heading}>Git Sources{sources.length ? ` (${sources.length})` : ""}</Text>
       {sources.map((s) => (
         <Text key={`${s.url}-${s.label}`} style={s.error ? styles.error : styles.muted}>
           {s.label}: {s.syncing ? "syncing…" : `synced ${ago(s.lastSync)}`}{s.error ? `. Last sync failed, using the previous copy: ${s.error}` : ""}
         </Text>
       ))}
       {problems.map((p) => <Text key={`${p.origin}/${p.file}`} style={styles.error}>{p.origin} {p.file}: {p.message}</Text>)}
-      {open ? (
+      <>
         <View style={styles.form}>
           <Text style={styles.muted}>
             Each file in the folder defines one server: name, url, auth (none, api-key or oauth), optional header and instructions. Never put a key in it.
@@ -283,7 +297,7 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
             <Button styles={styles} small label={syncNow.isPending ? "Syncing…" : "Sync Now"} onPress={() => syncNow.mutate()} />
           </View>
         </View>
-      ) : null}
+      </>
     </View>
   );
 }
@@ -292,17 +306,14 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
 function DefaultServers({ styles }: { styles: Styles }) {
   const settings = useSettings(sourcesSettings);
   const [draft, setDraft] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   useEffect(() => {
     if (draft === null && settings.status === "ready") setDraft(settings.values.defaultServers);
   }, [draft, settings]);
   const current = settings.status === "ready" ? settings.values.defaultServers.trim() : "";
   return (
-    <View style={styles.panel}>
-      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Attach to every new agent by default" onPress={() => setOpen((v) => !v)}>
-        <Text style={styles.heading}>{open ? "▾ Attach to every new agent by default" : "▸ Attach to every new agent by default"}{current ? ` (${current})` : ""}</Text>
-      </Pressable>
-      {open ? (
+    <View style={styles.form}>
+      <Text style={styles.heading}>Attach to every new agent by default{current ? ` (${current})` : ""}</Text>
+      <>
         <View style={styles.form}>
           <Text style={styles.muted}>
             Server names, comma separated, or * for every server. Leave empty to attach none. An agent created with PASEO_MCP_SERVERS uses that instead; PASEO_MCP_SERVERS=none opts it out.
@@ -314,7 +325,7 @@ function DefaultServers({ styles }: { styles: Styles }) {
             <Button styles={styles} small primary disabled={settings.status !== "ready" || draft === null} label={settings.status === "ready" && settings.saving ? "Saving…" : "Save"} onPress={() => { if (settings.status === "ready" && draft !== null) void settings.save({ ...settings.values, defaultServers: draft.trim() }, settings.revision); }} />
           </View>
         </View>
-      ) : null}
+      </>
     </View>
   );
 }
