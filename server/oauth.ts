@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { timeout } from "./files";
+import type { OAuthClient } from "../shared/definition";
+import { resolveRef } from "./refs";
 import type { OAuthState } from "./store";
 
 type Fetch = typeof fetch;
@@ -123,6 +125,18 @@ export async function register(info: AuthServerInfo, redirectUri: string, fetchI
   return { clientId: body.client_id, clientSecret: body.client_secret };
 }
 
+/** A pre-registered client with its references read; kept in memory only. */
+export interface ClientAuth {
+  clientId: string;
+  clientSecret?: string;
+  method: "client_secret_post" | "client_secret_basic" | "none";
+}
+
+export function resolveClient(def: OAuthClient): ClientAuth {
+  const clientSecret = def.clientSecretRef ? resolveRef(def.clientSecretRef) : undefined;
+  return { clientId: resolveRef(def.clientIdRef), clientSecret, method: def.tokenEndpointAuth ?? (clientSecret ? "client_secret_post" : "none") };
+}
+
 export interface Pkce {
   verifier: string;
   challenge: string;
@@ -152,14 +166,22 @@ export interface TokenSet {
   expiresAt?: number;
 }
 
-async function tokenRequest(state: Pick<OAuthState, "tokenEndpoint" | "clientId" | "clientSecret" | "resource">, params: Record<string, string>, fetchImpl: Fetch): Promise<TokenSet> {
-  const body = new URLSearchParams({ ...params, client_id: state.clientId, resource: state.resource });
-  if (state.clientSecret) body.set("client_secret", state.clientSecret);
+async function tokenRequest(state: Pick<OAuthState, "tokenEndpoint" | "clientId" | "clientSecret" | "resource">, params: Record<string, string>, fetchImpl: Fetch, client?: ClientAuth): Promise<TokenSet> {
+  const clientId = client?.clientId ?? state.clientId;
+  const clientSecret = client ? client.clientSecret : state.clientSecret;
+  const method = client?.method ?? "client_secret_post";
+  const body = new URLSearchParams({ ...params, resource: state.resource });
+  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded", accept: "application/json" };
+  if (method === "client_secret_basic" && clientSecret) headers.authorization = `Basic ${Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`).toString("base64")}`;
+  else {
+    body.set("client_id", clientId);
+    if (clientSecret && method !== "none") body.set("client_secret", clientSecret);
+  }
   let res: Response;
   try {
     res = await fetchImpl(state.tokenEndpoint, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      headers,
       body: body.toString(),
       signal: timeout(TIMEOUT_MS),
     });
@@ -179,11 +201,11 @@ async function tokenRequest(state: Pick<OAuthState, "tokenEndpoint" | "clientId"
   };
 }
 
-export function exchangeCode(state: OAuthState, code: string, verifier: string, fetchImpl: Fetch = fetch): Promise<TokenSet> {
-  return tokenRequest(state, { grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: state.redirectUri }, fetchImpl);
+export function exchangeCode(state: OAuthState, code: string, verifier: string, fetchImpl: Fetch = fetch, client?: ClientAuth): Promise<TokenSet> {
+  return tokenRequest(state, { grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: state.redirectUri }, fetchImpl, client);
 }
 
-export function refresh(state: OAuthState, fetchImpl: Fetch = fetch): Promise<TokenSet> {
+export function refresh(state: OAuthState, fetchImpl: Fetch = fetch, client?: ClientAuth): Promise<TokenSet> {
   if (!state.refreshToken) throw new OAuthError("Not signed in", true);
-  return tokenRequest(state, { grant_type: "refresh_token", refresh_token: state.refreshToken }, fetchImpl);
+  return tokenRequest(state, { grant_type: "refresh_token", refresh_token: state.refreshToken }, fetchImpl, client);
 }

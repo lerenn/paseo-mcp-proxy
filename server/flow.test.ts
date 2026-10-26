@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { statSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +17,7 @@ afterEach(async () => {
 });
 
 /** An upstream that is both an MCP server (requires its current bearer) and its own OAuth server. */
-async function upstream(opts: { sse?: boolean; rejectFirst?: boolean } = {}) {
+async function upstream(opts: { sse?: boolean; rejectFirst?: boolean; noRegistration?: boolean } = {}) {
   let access = "at-1";
   let refresh = "rt-1";
   let challenge = "";
@@ -24,7 +25,7 @@ async function upstream(opts: { sse?: boolean; rejectFirst?: boolean } = {}) {
   const s = await listen((req, res, seen) => {
     const u = new URL(req.url!, "http://x");
     if (u.pathname === "/.well-known/oauth-protected-resource/mcp") return send(res, 200, { resource: `${s.url}/mcp`, authorization_servers: [s.url] });
-    if (u.pathname === "/.well-known/oauth-authorization-server") return send(res, 200, { authorization_endpoint: `${s.url}/authorize`, token_endpoint: `${s.url}/token`, registration_endpoint: `${s.url}/register` });
+    if (u.pathname === "/.well-known/oauth-authorization-server") return send(res, 200, { authorization_endpoint: `${s.url}/authorize`, token_endpoint: `${s.url}/token`, ...(opts.noRegistration ? {} : { registration_endpoint: `${s.url}/register` }) });
     if (u.pathname === "/register") return send(res, 201, { client_id: "client-1" });
     if (u.pathname === "/token") {
       const p = new URLSearchParams(seen.body);
@@ -115,6 +116,56 @@ describe("OAuth sign-in", () => {
     await fetch(authUrl);
     await t.service.completeSignIn("demo", `http://127.0.0.1:1/oauth/callback?code=the-code&state=${authUrl.searchParams.get("state")}`);
     expect(t.service.views()[0].status).toBe("connected");
+  });
+});
+
+describe("pre-registered OAuth client", () => {
+  async function preregistered(extra: Record<string, unknown> = {}) {
+    const up = await upstream({ noRegistration: true });
+    const t = await setup(up);
+    const file = path.join(t.dir, "client.json");
+    writeFileSync(file, JSON.stringify({ client_id: "slack-id", nested: { secret: "s3cr3t-value" } }));
+    t.store.add({ name: "slack", url: `${up.url}/mcp`, auth: "oauth", oauthClient: { clientIdRef: `file:${file}#client_id`, clientSecretRef: `file:${file}#nested.secret`, scopes: ["channels:read", "users:read"], ...extra } });
+    return { up, t, file };
+  }
+
+  it("skips registration, requests only the configured scopes and sends the secret in the token request", async () => {
+    const { up, t } = await preregistered();
+    const authUrl = new URL(await t.service.signIn("slack"));
+    expect(up.seen.some((s) => s.url === "/register")).toBe(false);
+    expect(authUrl.searchParams.get("client_id")).toBe("slack-id");
+    expect(authUrl.searchParams.get("scope")).toBe("channels:read users:read");
+    await fetch(authUrl);
+    const cb = await fetch(`${t.base}/oauth/callback?code=the-code&state=${authUrl.searchParams.get("state")}`);
+    expect(cb.status).toBe(200);
+    const token = new URLSearchParams(up.seen.find((s) => s.url === "/token")!.body);
+    expect(token.get("client_id")).toBe("slack-id");
+    expect(token.get("client_secret")).toBe("s3cr3t-value");
+    expect(t.service.views()[0]).toMatchObject({ status: "connected", preRegistered: true });
+    // The secret is read on demand: neither the views nor the stored secrets file hold it.
+    expect(JSON.stringify(t.service.views())).not.toContain("s3cr3t-value");
+    expect(readFileSync(path.join(t.dir, "secrets.json"), "utf8")).not.toContain("s3cr3t-value");
+  });
+
+  it("supports client_secret_basic and refreshes with the client credentials", async () => {
+    const { up, t } = await preregistered({ tokenEndpointAuth: "client_secret_basic" });
+    const authUrl = new URL(await t.service.signIn("slack"));
+    await fetch(authUrl);
+    await fetch(`${t.base}/oauth/callback?code=the-code&state=${authUrl.searchParams.get("state")}`);
+    const first = up.seen.find((s) => s.url === "/token")!;
+    expect(first.headers.authorization).toBe(`Basic ${Buffer.from("slack-id:s3cr3t-value").toString("base64")}`);
+    expect(first.body).not.toContain("s3cr3t-value");
+    await t.creds.headers(t.store.get("slack")!, true);
+    const refreshed = up.seen.filter((s) => s.url === "/token").at(-1)!;
+    expect(refreshed.body).toContain("grant_type=refresh_token");
+    expect(refreshed.headers.authorization).toMatch(/^Basic /);
+  });
+
+  it("names the missing reference without revealing values when it cannot be read", async () => {
+    const { t, file } = await preregistered();
+    writeFileSync(file, JSON.stringify({ nested: { secret: "s3cr3t-value" } }));
+    await expect(t.service.signIn("slack")).rejects.toThrow(/no string field "client_id"/);
+    await expect(t.service.signIn("slack")).rejects.not.toThrow(/s3cr3t-value/);
   });
 });
 

@@ -5,7 +5,7 @@ import { auditEntrySchema, authTypeSchema, problemSchema, serverViewSchema, sour
 const listOutput = z.object({
   servers: z.array(serverViewSchema),
   /** Local address agents reach, or null when the port could not be bound. */
-  endpoint: z.object({ url: z.string().nullable(), error: z.string().nullable() }),
+  endpoint: z.object({ url: z.string().nullable(), error: z.string().nullable(), callbackUrl: z.string().nullable() }),
   /** Git sources and how their last sync went. */
   sources: z.array(sourceStatusSchema),
   /** Files in git sources that were skipped, with why. */
