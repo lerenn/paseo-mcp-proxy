@@ -42,6 +42,13 @@ export function McpProxyScreen({ theme, layout }: PluginScreenProps) {
         {servers.length === 0 ? <Text style={[styles.muted, styles.pad]}>No servers yet.</Text> : null}
         {servers.map((s, i) => <ServerRow key={s.name} server={s} first={i === 0} styles={styles} theme={theme} onChanged={reload} />)}
       </View>
+      {query.data?.endpoint.callbackUrl ? (
+        <View style={styles.panel}>
+          <Text style={styles.heading}>OAuth Callback URL</Text>
+          <Text style={styles.muted}>Register this exact address as the redirect URL of the app when a server needs a pre-registered OAuth client (for example a Slack app).</Text>
+          <Text selectable style={styles.value} accessibilityLabel="OAuth callback URL">{query.data.endpoint.callbackUrl}</Text>
+        </View>
+      ) : null}
       {adding ? <AddForm styles={styles} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} /> : <Button styles={styles} label="Add Server" onPress={() => setAdding(true)} />}
 
       <SettingsSection styles={styles} sources={query.data?.sources ?? []} problems={query.data?.problems ?? []} onChanged={reload} />
@@ -81,6 +88,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
           <Text style={styles.name} numberOfLines={1}>{server.displayName ?? server.name}</Text>
           {server.displayName ? <Text style={styles.muted} numberOfLines={1} accessibilityLabel={`ID: ${server.name}`}>{server.name}</Text> : null}
           <Text style={styles.badge}>{AUTH_LABEL[server.auth]}</Text>
+          {server.preRegistered ? <Text style={styles.badge}>Pre-registered client</Text> : null}
           {server.origin ? <Text style={styles.badge} accessibilityLabel={`Defined in git: ${server.origin}`}>{server.origin}</Text> : null}
         </View>
         <View style={styles.actions}>

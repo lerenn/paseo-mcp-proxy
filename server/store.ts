@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { Definition } from "../shared/definition";
+import type { Definition, OAuthClient } from "../shared/definition";
 import type { AuthType } from "../shared/server";
 import { home, readJson, writeJson } from "./files";
 import type { GitRegistry } from "./registry";
@@ -34,6 +34,8 @@ export interface ServerRecord {
   definitionDisplayName: string | null;
   url: string;
   instructions: string;
+  /** Pre-registered OAuth client references (never values), for oauth servers. */
+  oauthClient: OAuthClient | null;
   auth: AuthConfig;
   /** Last failure to authenticate or reach the server; cleared on success. */
   lastError?: string | null;
@@ -87,7 +89,7 @@ export class ServerStore {
     if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
     else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
     else auth = { type: "none" };
-    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", auth, lastError: mine?.lastError ?? null, origin };
+    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {

@@ -90,8 +90,12 @@ export class ProxyService {
     const redirectUri = `${base}/oauth/callback`;
     const info = await oauth.discover(record.url, this.fetchImpl);
     const known = record.auth.oauth;
-    const client =
-      known && known.redirectUri === redirectUri && known.tokenEndpoint === info.tokenEndpoint
+    // A pre-registered client replaces dynamic registration, and its scopes replace the advertised ones.
+    const preset = record.oauthClient;
+    if (preset?.scopes) info.scope = preset.scopes.join(" ");
+    const client = preset
+      ? { clientId: oauth.resolveClient(preset).clientId, clientSecret: undefined }
+      : known && known.redirectUri === redirectUri && known.tokenEndpoint === info.tokenEndpoint
         ? { clientId: known.clientId, clientSecret: known.clientSecret }
         : await oauth.register(info, redirectUri, this.fetchImpl);
     const state: Pick<NonNullable<typeof known>, "clientId" | "clientSecret" | "authorizationEndpoint" | "tokenEndpoint" | "resource" | "scope" | "redirectUri"> = {
@@ -125,7 +129,7 @@ export class ProxyService {
     const record = this.store.get(pending.name);
     if (!record || record.auth.type !== "oauth" || !record.auth.oauth) return { ok: false, message: "The server was removed during sign-in." };
     try {
-      const tokens = await oauth.exchangeCode(record.auth.oauth, code, pending.verifier, this.fetchImpl);
+      const tokens = await oauth.exchangeCode(record.auth.oauth, code, pending.verifier, this.fetchImpl, record.oauthClient ? oauth.resolveClient(record.oauthClient) : undefined);
       this.store.update(pending.name, (r) =>
         r.auth.type === "oauth" && r.auth.oauth
           ? { ...r, lastError: null, auth: { type: "oauth", oauth: { ...r.auth.oauth, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken ?? r.auth.oauth.refreshToken, expiresAt: tokens.expiresAt } } }
@@ -249,6 +253,7 @@ export function view(r: ServerRecord, signingIn: boolean): ServerView {
     url: r.url,
     auth: r.auth.type,
     header: r.auth.type === "api-key" ? r.auth.header : null,
+    preRegistered: r.oauthClient !== null,
     instructions: r.instructions,
     status,
     detail,

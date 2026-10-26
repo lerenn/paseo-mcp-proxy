@@ -76,7 +76,7 @@ export default function contribute(server: PluginServerContext) {
 
   const listing = () => ({
     servers: service.views(),
-    endpoint: { url, error: startError },
+    endpoint: { url, error: startError, callbackUrl: url ? `${url}/oauth/callback` : null },
     sources: sources.map((source) => ({ label: sourceLabel(source), url: source.url, ...gitSources.status(source) })),
     problems: registry.problems(),
   });

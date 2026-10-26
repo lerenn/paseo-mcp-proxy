@@ -27,6 +27,8 @@ export const serverViewSchema = z.object({
   auth: authTypeSchema,
   /** Header that carries the API key (api-key only). */
   header: z.string().nullable(),
+  /** The server signs in with a pre-registered OAuth client (no dynamic registration). */
+  preRegistered: z.boolean(),
   /** Text added to the MCP `instructions` agents see. */
   instructions: z.string(),
   status: statusSchema,

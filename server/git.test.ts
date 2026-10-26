@@ -2,6 +2,7 @@ import { rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { GitSources, sourceLabel } from "./git-sync";
+import { resolveRef } from "./refs";
 import { GitRegistry } from "./registry";
 import { ProxyService } from "./service";
 import { ServerStore } from "./store";
@@ -133,6 +134,31 @@ describe("display names", () => {
     t.service.add({ name: "local", displayName: " My Local ", url: "https://l.example/mcp", auth: "none" });
     expect(t.service.views().find((v) => v.name === "local")).toMatchObject({ displayName: "My Local", origin: null });
     expect(() => t.service.add({ name: "other", displayName: "x".repeat(65), url: "https://l.example/mcp", auth: "none" })).toThrow();
+  });
+});
+
+describe("oauthClient in definitions", () => {
+  const SLACK = (extra: string) => `name: slack\nurl: https://mcp.slack.com/mcp\nauth: oauth\n${extra}`;
+  it("loads references and scopes, and rejects inline secrets, bad refs and non-oauth servers", async () => {
+    const t = await setup({
+      "slack.yaml": SLACK("oauthClient:\n  clientIdRef: file:~/.config/slack-mcp/client.json#client_id\n  clientSecretRef: file:~/.config/slack-mcp/client.json#client_secret\n  scopes: [channels:read, users:read]\n"),
+      "inline.yaml": "name: inline\nurl: https://x.example/mcp\nauth: oauth\noauthClient:\n  clientIdRef: abc123\n",
+      "secret.yaml": "name: secret\nurl: https://x.example/mcp\nauth: oauth\noauthClient:\n  clientIdRef: env:ID\n  clientSecret: oops\n",
+      "none.yaml": "name: none\nurl: https://x.example/mcp\nauth: none\noauthClient:\n  clientIdRef: env:ID\n",
+    });
+    await t.gitSources.sync(t.source);
+    expect(t.store.names()).toEqual(["slack"]);
+    expect(t.store.get("slack")!.oauthClient).toMatchObject({ clientIdRef: "file:~/.config/slack-mcp/client.json#client_id", scopes: ["channels:read", "users:read"] });
+    expect(t.registry.problems().map((p) => p.file).sort()).toEqual(["inline.yaml", "none.yaml", "secret.yaml"]);
+  });
+});
+
+describe("resolveRef", () => {
+  it("reads env and nested file fields, and errors name the reference only", () => {
+    process.env.MCPP_TEST_REF = " from-env ";
+    expect(resolveRef("env:MCPP_TEST_REF")).toBe("from-env");
+    expect(() => resolveRef("env:MCPP_TEST_MISSING")).toThrow(/not set/);
+    expect(() => resolveRef("file:/nonexistent/x.json#a")).toThrow(/does not exist/);
   });
 });
 

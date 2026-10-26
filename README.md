@@ -68,6 +68,24 @@ Unknown fields are rejected, so a `key:` or `token:` line makes the file invalid
 an invalid file is skipped and shown on the screen with the reason, and valid files still load. `http://` URLs
 are only accepted for localhost.
 
+### Pre-registered OAuth clients
+
+Servers without dynamic client registration (Slack) get an `oauthClient` block next to `auth: oauth`. It holds
+references, never values; they are read on the daemon at sign-in and at each token refresh, kept in memory only,
+and errors name the reference, not what it held.
+
+```yaml
+auth: oauth
+oauthClient:
+  clientIdRef: file:~/.config/slack-mcp/client.json#client_id      # file:<path>#<dotted.key> (JSON) or env:<NAME>
+  clientSecretRef: file:~/.config/slack-mcp/client.json#client_secret   # omit for a public client
+  scopes: [channels:read, users:read]    # requested instead of the advertised scopes
+  tokenEndpointAuth: client_secret_post  # or client_secret_basic, or none (default: post with a secret, none without)
+```
+
+Registration is skipped and the configured scopes are the only ones requested. The screen shows the exact
+callback URL (`http://127.0.0.1:<port>/oauth/callback`) to register as the app's redirect URL.
+
 ### Display names
 
 The screen shows `displayName` instead of the ID, with the ID as secondary text; with none set it shows the
