@@ -96,6 +96,20 @@ git-defined servers are read-only and a label is a per-machine preference, not p
 Display names are labels only: the ID stays the server's name in `PASEO_MCP_SERVERS`, the proxy URL and the
 agent's MCP config.
 
+### Limiting a server to some tools
+
+`allowTools:` in a definition lists the tools agents may use, by exact name or with `*` (`get_*`). Other tools are removed from
+`tools/list` and refused in `tools/call` (the call never reaches the upstream), whatever the upstream offers. Leave it out to allow all.
+It is how a write tool is kept out of reach of an agent that only needs to read; to allow it later, edit the file in git.
+
+## Giving agents servers by label
+
+The `labelServers` setting grants servers to a new agent by its labels, on top of `PASEO_MCP_SERVERS` and the defaults
+(and even when the agent set `PASEO_MCP_SERVERS=none`): `{"paseo.prbr=1": "annie-prod-sql, launchdarkly"}`. A bare key
+matches any value. It works at creation, so an agent that already exists keeps the servers it was created with; create it again with
+the label. Anyone who can create an agent with the label gets the servers, so use labels only trusted creators set. It needs a
+daemon that gives plugins the agent's labels at creation (without them nothing is granted by label).
+
 ## Giving agents servers: the `PASEO_MCP_SERVERS` contract
 
 Other plugins (for example agents-roles) do not import this one. They set one variable in the agent's

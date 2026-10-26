@@ -25,3 +25,19 @@ export function requestedServers(env: Record<string, string | undefined> | undef
   const names = parseServerList(raw);
   return names.length === 1 && names[0] === "none" ? [] : names;
 }
+
+/**
+ * Servers granted by an agent's labels: `rules` maps `key=value` (or a bare `key`, any value) to a server list.
+ * Labels come from the daemon's create context; without them (an older daemon) nothing is granted.
+ */
+export function serversForLabels(labels: Record<string, string> | undefined, rules: Record<string, string>): string[] {
+  if (!labels) return [];
+  const out: string[] = [];
+  for (const [rule, servers] of Object.entries(rules)) {
+    const i = rule.indexOf("=");
+    const key = i < 0 ? rule : rule.slice(0, i);
+    const value = i < 0 ? undefined : rule.slice(i + 1);
+    if (key in labels && (value === undefined || labels[key] === value)) out.push(...parseServerList(servers));
+  }
+  return [...new Set(out)];
+}
