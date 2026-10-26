@@ -41,6 +41,11 @@ export const definitionSchema = z
     header: z.string().trim().min(1).optional(),
     /** Pre-registered OAuth client (references only). Only with auth: oauth. */
     oauthClient: oauthClientSchema.optional(),
+    /**
+     * Tools agents may use, by exact name or with `*` as a wildcard (`get_*`). The rest are hidden from `tools/list` and refused
+     * in `tools/call`, whatever the upstream offers. Omit to allow all. This is how a write tool is kept out of reach.
+     */
+    allowTools: z.array(z.string().trim().min(1)).optional(),
     /** Text added to the MCP instructions agents see. */
     instructions: z.string().optional(),
   })

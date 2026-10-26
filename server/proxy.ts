@@ -128,6 +128,9 @@ export class ProxyHttp {
       });
     };
 
+    const blocked = calls.find((c) => c.tool !== null && !toolAllowed(record.allowTools, c.tool));
+    if (blocked) return refuse(`the tool "${blocked.tool}" is not allowed on ${record.name} (allowed: ${record.allowTools!.join(", ")})`);
+
     const abort = new AbortController();
     res.on("close", () => abort.abort());
     const send = async (force: boolean) => {
@@ -166,6 +169,12 @@ export class ProxyHttp {
     }
     log(upstream.status, null);
 
+    if (upstream.ok && record.allowTools && calls.some((c) => c.method === "tools/list")) {
+      let text = filterTools(await upstream.text(), headers["content-type"] ?? "", record.allowTools);
+      if (calls.some((c) => c.method === "initialize")) text = withInstructions(text, headers["content-type"] ?? "", instructionsFor(record.name, record.instructions));
+      res.writeHead(upstream.status, headers);
+      return void res.end(text);
+    }
     if (upstream.ok && calls.some((c) => c.method === "initialize")) {
       const text = withInstructions(await upstream.text(), headers["content-type"] ?? "", instructionsFor(record.name, record.instructions));
       res.writeHead(upstream.status, headers);
@@ -174,6 +183,40 @@ export class ProxyHttp {
     res.writeHead(upstream.status, headers);
     if (!upstream.body) return void res.end();
     Readable.fromWeb(upstream.body as never).on("error", () => res.destroy()).pipe(res);
+  }
+}
+
+const toolPattern = (pattern: string) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
+
+/** Whether a server's `allowTools` lets this tool through (no list: all). */
+export function toolAllowed(allow: readonly string[] | null | undefined, tool: string): boolean {
+  return !allow || allow.some((p) => toolPattern(p).test(tool));
+}
+
+/** Drop the tools that are not allowed from a `tools/list` answer, JSON or SSE. */
+export function filterTools(text: string, contentType: string, allow: readonly string[]): string {
+  const patch = (message: any) => {
+    if (Array.isArray(message?.result?.tools)) message.result.tools = message.result.tools.filter((t: { name?: string }) => typeof t?.name === "string" && toolAllowed(allow, t.name));
+    return message;
+  };
+  try {
+    if (contentType.includes("text/event-stream")) {
+      return text
+        .split("\n")
+        .map((line) => {
+          if (!line.startsWith("data:")) return line;
+          try {
+            return `data: ${JSON.stringify(patch(JSON.parse(line.slice(5))))}`;
+          } catch {
+            return line;
+          }
+        })
+        .join("\n");
+    }
+    const parsed = JSON.parse(text);
+    return JSON.stringify(Array.isArray(parsed) ? parsed.map(patch) : patch(parsed));
+  } catch {
+    return text;
   }
 }
 

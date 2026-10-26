@@ -9,6 +9,8 @@ export interface AttachOptions {
   url: string;
   /** Servers every new agent gets unless its own PASEO_MCP_SERVERS says otherwise. */
   defaults?: string[];
+  /** Servers its labels grant (the `labelServers` setting), added to what it asked for. */
+  extra?: string[];
   /** Names currently in the registry. */
   registered: string[];
   /** Mints the agent's capability for the servers it is granted. */
@@ -21,7 +23,7 @@ export interface AttachOptions {
  * not an error: they are listed in a note so the agent can tell the user.
  */
 export function attachServers(request: CreateRequest, o: AttachOptions): CreateRequest | undefined {
-  const asked = requestedServers(request.env, o.defaults);
+  const asked = [...new Set([...requestedServers(request.env, o.defaults), ...(o.extra ?? [])])];
   if (!asked.length) return undefined;
   const granted = asked.includes(ALL) ? [...o.registered] : asked.filter((n) => o.registered.includes(n));
   const missing = asked.filter((n) => n !== ALL && !o.registered.includes(n));
