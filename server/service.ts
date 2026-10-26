@@ -2,17 +2,10 @@ import { timeout } from "./files";
 import { randomBytes } from "node:crypto";
 import { displayNameSchema, type ServerView } from "../shared/server";
 import * as oauth from "./oauth";
+import { PENDING_TTL_MS, PendingStore } from "./pending";
 import { AuthRequired, type Credentials } from "./upstream";
 import type { ServerRecord, ServerStore } from "./store";
 import { DEFAULT_HTTP_HOSTS, validateHeader, validateName, validateUrl } from "./validate";
-
-const PENDING_TTL_MS = 10 * 60_000;
-
-interface Pending {
-  name: string;
-  verifier: string;
-  expires: number;
-}
 
 export interface AddInput {
   name: string;
@@ -26,21 +19,18 @@ export interface AddInput {
 
 /** Backs the screen's RPCs: registry edits, OAuth sign-in and connection tests. */
 export class ProxyService {
-  private readonly pending = new Map<string, Pending>();
-  /** States of flows that timed out, kept for a while so the error can say "expired" rather than "unknown". */
-  private readonly expired = new Map<string, number>();
-
   constructor(
     private readonly store: ServerStore,
     private readonly creds: Credentials,
     private readonly endpoint: () => string | null,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly allowHttpHosts: () => string[] = () => DEFAULT_HTTP_HOSTS,
+    /** Pending sign-ins live in a file on the daemon, not in this object, so they outlive a reload. */
+    private readonly pending: PendingStore = new PendingStore(),
   ) {}
 
   views(): ServerView[] {
-    this.sweep();
-    const signingIn = new Set([...this.pending.values()].map((p) => p.name));
+    const signingIn = this.pending.names();
     return this.store.list().map((r) => view(r, signingIn.has(r.name)));
   }
 
@@ -57,7 +47,7 @@ export class ProxyService {
 
   remove(name: string) {
     this.store.remove(name);
-    for (const [state, p] of this.pending) if (p.name === name) this.pending.delete(state);
+    this.pending.deleteServer(name.toLowerCase());
   }
 
   /** Allowed for git-managed servers too: the definition is in git, the key never is. */
@@ -120,17 +110,16 @@ export class ProxyService {
     this.store.update(name, (r) => ({ ...r, auth: { type: "oauth", oauth: { ...state, refreshToken: known?.refreshToken, accessToken: known?.accessToken, expiresAt: known?.expiresAt } } }));
     const { verifier, challenge } = oauth.pkce();
     const nonce = randomBytes(24).toString("base64url");
-    this.pending.set(nonce, { name, verifier, expires: Date.now() + PENDING_TTL_MS });
+    this.pending.add(nonce, { name: record.name, verifier, expires: Date.now() + PENDING_TTL_MS });
     return oauth.authorizationUrl({ info, clientId: client.clientId, redirectUri, challenge, state: nonce });
   }
 
   /** The browser came back (to the daemon's callback, or via a pasted address). */
   async finishSignIn(params: URLSearchParams, expectName?: string): Promise<{ ok: boolean; message: string }> {
-    this.sweep();
-    const state = params.get("state") ?? "";
+    const state = (params.get("state") ?? "").trim();
     const pending = this.pending.get(state);
-    if (!pending && this.expired.has(state)) return { ok: false, message: "This sign-in expired. Press Sign In again to start a new one." };
-    if (!pending || (expectName && pending.name !== expectName)) return { ok: false, message: "This address belongs to a different sign-in (state mismatch). Paste the address from the latest Sign In." };
+    if (!pending && this.pending.wasExpired(state)) return { ok: false, message: "This sign-in expired. Press Sign In again to start a new one." };
+    if (!pending || (expectName && pending.name.toLowerCase() !== expectName.toLowerCase())) return { ok: false, message: "This address belongs to a different sign-in (state mismatch). Paste the address from the latest Sign In." };
     this.pending.delete(state);
     const error = params.get("error");
     if (error) return { ok: false, message: `The server refused the sign-in: ${params.get("error_description") ?? error}` };
@@ -161,7 +150,7 @@ export class ProxyService {
 
   /** Drop the pending flow of a server (the user cancelled). */
   cancelSignIn(name: string) {
-    for (const [state, p] of this.pending) if (p.name === name) this.pending.delete(state);
+    this.pending.deleteServer(name.toLowerCase());
   }
 
   /** Open an MCP session upstream with the stored credentials. */
@@ -201,16 +190,6 @@ export class ProxyService {
     const record = this.store.get(name);
     if (!record) throw new Error(`No server named "${name}"`);
     return record;
-  }
-
-  private sweep() {
-    const now = Date.now();
-    for (const [state, p] of this.pending) {
-      if (p.expires >= now) continue;
-      this.pending.delete(state);
-      this.expired.set(state, now);
-    }
-    for (const [state, at] of this.expired) if (now - at > 60 * 60_000) this.expired.delete(state);
   }
 }
 

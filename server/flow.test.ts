@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuditLog } from "./audit";
 import { ProxyHttp } from "./proxy";
+import { PendingStore } from "./pending";
 import { ProxyService } from "./service";
 import { SessionStore } from "./sessions";
 import { ServerStore } from "./store";
@@ -66,11 +67,12 @@ async function setup(up: Awaited<ReturnType<typeof upstream>>) {
   const audit = new AuditLog(path.join(dir, "audit.jsonl"));
   const creds = new Credentials(store);
   let base = "";
-  const service = new ProxyService(store, creds, () => base);
+  const pendingFile = path.join(dir, "pending.json");
+  const service = new ProxyService(store, creds, () => base, fetch, undefined, new PendingStore(pendingFile));
   const http = new ProxyHttp({ store, sessions, creds, audit, onCallback: (p) => service.finishSignIn(p) });
   base = await http.start(0);
   closers.push(() => http.stop());
-  return { dir, store, sessions, audit, creds, service, http, base };
+  return { dir, pendingFile, store, sessions, audit, creds, service, http, base };
 }
 
 const rpc = (base: string, name: string, token: string, body: unknown) =>
@@ -253,6 +255,64 @@ describe("pasted callback", () => {
     const t = await pending();
     t.service.cancelSignIn("demo");
     expect(t.service.views()[0].signingIn).toBe(false);
+  });
+});
+
+describe("pending sign-in persistence", () => {
+  /** A fresh service over the same files, as after a plugin reload or daemon restart. */
+  const reload = (t: Awaited<ReturnType<typeof setup>>) => new ProxyService(t.store, t.creds, () => t.base, fetch, undefined, new PendingStore(t.pendingFile));
+
+  it("completes a pre-registered (Slack-like) sign-in from the pasted address after a reload", async () => {
+    const up = await upstream({ noRegistration: true });
+    const t = await setup(up);
+    t.store.add({ name: "slack", url: `${up.url}/mcp`, auth: "oauth", oauthClient: { clientIdRef: "env:UNUSED", scopes: ["channels:read"] } });
+    t.service.setOAuthClient("slack", { clientId: "ui-id", clientSecret: "ui-s3cret" });
+    const authUrl = new URL(await t.service.signIn("slack"));
+    await fetch(authUrl);
+    const state = authUrl.searchParams.get("state")!;
+    // Unrelated writes (client panel Save, settings, instructions) in the meantime, then a reload.
+    t.service.setOAuthClient("slack", { clientSecret: "ui-s3cret-2" });
+    t.store.setDisplayNames({ slack: "Slack" });
+    const next = reload(t);
+    expect(next.views()[0].signingIn).toBe(true);
+    // Slack echoes extra params; the state is URL-encoded as the browser shows it.
+    await next.completeSignIn("slack", `http://127.0.0.1:47824/oauth/callback?code=the-code&state=${encodeURIComponent(state)}&team_id=T1&session_state=x`);
+    expect(next.views()[0].status).toBe("connected");
+  });
+
+  it("keeps several pending sign-ins valid, so any recent Sign In works", async () => {
+    const up = await upstream();
+    const t = await setup(up);
+    t.service.add({ name: "demo", url: `${up.url}/mcp`, auth: "oauth" });
+    const states: string[] = [];
+    for (let i = 0; i < 3; i++) states.push(new URL(await t.service.signIn("demo")).searchParams.get("state")!);
+    // The code is wrong on purpose: the states must be recognised as ours, so the failure comes from the token exchange.
+    for (const s of states.slice(0, 2)) {
+      const err = await reload(t).completeSignIn("demo", `?code=wrong&state=${s}`).catch((e: Error) => e);
+      expect((err as Error).message).not.toContain("state mismatch");
+      expect((err as Error).message).not.toContain("expired");
+    }
+  });
+
+  it("expires after ten minutes, also across a reload, and cancel clears it", async () => {
+    const up = await upstream();
+    const t = await setup(up);
+    t.service.add({ name: "demo", url: `${up.url}/mcp`, auth: "oauth" });
+    const state = new URL(await t.service.signIn("demo")).searchParams.get("state")!;
+    const spy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
+    await expect(reload(t).completeSignIn("demo", `?code=the-code&state=${state}`)).rejects.toThrow(/expired/);
+    spy.mockRestore();
+    await t.service.signIn("demo");
+    reload(t).cancelSignIn("demo");
+    expect(reload(t).views()[0].signingIn).toBe(false);
+  });
+
+  it("keeps the verifier in a 0600 file", async () => {
+    const up = await upstream();
+    const t = await setup(up);
+    t.service.add({ name: "demo", url: `${up.url}/mcp`, auth: "oauth" });
+    await t.service.signIn("demo");
+    expect(statSync(t.pendingFile).mode & 0o777).toBe(0o600);
   });
 });
 
