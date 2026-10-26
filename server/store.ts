@@ -34,6 +34,8 @@ export interface ServerRecord {
   definitionDisplayName: string | null;
   url: string;
   instructions: string;
+  /** The tools agents may use (see the definition's `allowTools`); null allows all. */
+  allowTools: string[] | null;
   /** Pre-registered OAuth client references (never values), for oauth servers. */
   oauthClient: OAuthClient | null;
   auth: AuthConfig;
@@ -89,7 +91,7 @@ export class ServerStore {
     if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
     else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
     else auth = { type: "none" };
-    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, auth, lastError: mine?.lastError ?? null, origin };
+    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", allowTools: def.allowTools ?? null, oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {
