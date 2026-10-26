@@ -172,7 +172,9 @@ export class ProxyService {
       const sessionId = res.headers.get("mcp-session-id");
       if (sessionId) void this.fetchImpl(record.url, { method: "DELETE", headers: { ...headers, "mcp-session-id": sessionId } }).catch(() => {});
       if (!res.ok) {
-        const message = res.status === 401 || res.status === 403 ? `The server rejected the credentials (HTTP ${res.status})` : `The server answered HTTP ${res.status}`;
+        const detail = upstreamDetail(text);
+        const base = res.status === 401 || res.status === 403 ? `The server rejected the credentials (HTTP ${res.status})` : `The server answered HTTP ${res.status}`;
+        const message = detail ? `${base}: ${detail}` : base;
         this.creds.setError(name, message);
         return { ok: false, message };
       }
@@ -191,6 +193,27 @@ export class ProxyService {
     if (!record) throw new Error(`No server named "${name}"`);
     return record;
   }
+}
+
+/** The reason an upstream gave for an error (JSON-RPC, OAuth or Slack style), with anything token-like removed. */
+export function upstreamDetail(body: string): string {
+  let reason = "";
+  try {
+    const json: any = JSON.parse(body);
+    const err = json?.error;
+    const parts = [typeof err === "string" ? err : err?.message, json?.error_description, json?.message].filter((p) => typeof p === "string" && p);
+    reason = parts.join(" - ");
+  } catch {
+    reason = body.replace(/<[^>]*>/g, " ");
+  }
+  return reason
+    .replace(/\b(?:xox[a-z]-|xapp-|sk-|ghp_|gho_)[\w-]+/gi, "[redacted]")
+    .replace(/\b(Bearer|Basic)\s+\S+/gi, "$1 [redacted]")
+    .replace(/\b(code|token|secret|client_secret|access_token|refresh_token)=[^\s&]+/gi, "$1=[redacted]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
 }
 
 /** Callback parameters from a pasted full address or bare query string; null if it is neither. */
