@@ -1,5 +1,6 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
+import { displayNameSchema, SERVER_NAME } from "./server";
 
 export const DEFAULT_SYNC_MINUTES = 5;
 
@@ -38,6 +39,8 @@ export const sourcesSettings = defineSettings({
     /** Registry names (comma or space separated) or `*` attached to every new agent that does not set PASEO_MCP_SERVERS. Empty: none. */
     defaultServers: z.string().default(""),
     /** Host globs (`*` matches any run of characters) whose servers may use plain http://. Loopback is always allowed. */
+    /** Local display names by server name; they win over a definition's `displayName`. Set from the screen. */
+    displayNames: z.record(z.string().regex(SERVER_NAME), displayNameSchema).default({}),
     allowHttpHosts: z.array(z.string().trim().min(1)).default(["*.svc", "*.svc.cluster.local"]),
   }),
 });

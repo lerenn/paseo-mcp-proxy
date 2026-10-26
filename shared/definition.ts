@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { authTypeSchema, SERVER_NAME } from "./server";
+import { authTypeSchema, displayNameSchema, SERVER_NAME } from "./server";
 
 /**
  * One server as it is written in a git file: everything except secrets. API keys, OAuth client
@@ -11,6 +11,8 @@ export const definitionSchema = z
     /** Schema version, optional. */
     version: z.literal(1).optional(),
     name: z.string().regex(SERVER_NAME, "lowercase letters, digits and dashes, starting with a letter (32 at most)"),
+    /** Label for the screen, shown instead of the name. Agents never see it. */
+    displayName: displayNameSchema.optional(),
     url: z.string().trim().min(1),
     auth: authTypeSchema,
     /** Header that carries the API key; default Authorization. Only with auth: api-key. */

@@ -110,6 +110,32 @@ describe("git-defined servers", () => {
   });
 });
 
+describe("display names", () => {
+  it("reads displayName from the definition, falls back to null, and lets a local override win without touching the ID", async () => {
+    const t = await setup({ "linear.yaml": `${LINEAR}displayName: Linear\n`, "sentry.yml": SENTRY });
+    await t.gitSources.sync(t.source);
+    const pick = () => t.service.views().map((v) => [v.name, v.displayName, v.definitionDisplayName]);
+    expect(pick()).toEqual([["linear", "Linear", "Linear"], ["sentry", null, null]]);
+    t.store.setDisplayNames({ linear: "Linear (Anyshift)", sentry: "  Sentry  ", ghost: "Nobody" });
+    expect(pick()).toEqual([["linear", "Linear (Anyshift)", "Linear"], ["sentry", "Sentry", null]]);
+    expect(t.store.names()).toEqual(["linear", "sentry"]);
+    t.store.setDisplayNames({ linear: "   " });
+    expect(pick()).toEqual([["linear", "Linear", "Linear"], ["sentry", null, null]]);
+  });
+
+  it("rejects an empty or overlong displayName in git, and accepts one on a local server", async () => {
+    const t = await setup({
+      "ok.yaml": "name: ok\nurl: https://x.example/mcp\nauth: none\n",
+      "long.yaml": `name: long\nurl: https://x.example/mcp\nauth: none\ndisplayName: ${"x".repeat(65)}\n`,
+    });
+    await t.gitSources.sync(t.source);
+    expect(t.registry.problems().map((p) => p.file)).toEqual(["long.yaml"]);
+    t.service.add({ name: "local", displayName: " My Local ", url: "https://l.example/mcp", auth: "none" });
+    expect(t.service.views().find((v) => v.name === "local")).toMatchObject({ displayName: "My Local", origin: null });
+    expect(() => t.service.add({ name: "other", displayName: "x".repeat(65), url: "https://l.example/mcp", auth: "none" })).toThrow();
+  });
+});
+
 describe("sourceLabel", () => {
   it("shortens GitHub URLs to owner/repo@ref", () => {
     expect(sourceLabel({ url: "git@github.com:anyshift-io/lfradin-lab.git", ref: "main" })).toBe("anyshift-io/lfradin-lab@main");
