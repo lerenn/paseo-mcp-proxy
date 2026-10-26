@@ -5,7 +5,7 @@ import { ZodError } from "zod";
 import { definitionSchema, type Definition } from "../shared/definition";
 import type { GitSource } from "../shared/settings";
 import { sourceLabel } from "./git-sync";
-import { validateHeader, validateUrl } from "./validate";
+import { DEFAULT_HTTP_HOSTS, validateHeader, validateUrl } from "./validate";
 
 const EXTENSIONS = [".yaml", ".yml", ".json"];
 
@@ -26,9 +26,9 @@ function describe(error: unknown): string {
 }
 
 /** Parse one server file; the name must match the file name. */
-export function parseDefinition(text: string, file: string): Definition {
+export function parseDefinition(text: string, file: string, allowHttpHosts: string[] = DEFAULT_HTTP_HOSTS): Definition {
   const definition = definitionSchema.parse(parse(text));
-  definition.url = validateUrl(definition.url);
+  definition.url = validateUrl(definition.url, allowHttpHosts);
   if (definition.header) definition.header = validateHeader(definition.header);
   const expected = path.basename(file, path.extname(file));
   if (definition.name !== expected) throw new Error(`name "${definition.name}" must match the file name "${expected}"`);
@@ -43,11 +43,13 @@ export function parseDefinition(text: string, file: string): Definition {
 export class GitRegistry {
   private snapshot = new Map<string, GitDefinition>();
   private issues: Problem[] = [];
+  private allowHttpHosts = DEFAULT_HTTP_HOSTS;
 
   /** `dir(source)` is the source's folder inside its local clone. */
   constructor(private readonly dir: (source: GitSource) => string) {}
 
-  reload(sources: GitSource[]) {
+  reload(sources: GitSource[], allowHttpHosts: string[] = this.allowHttpHosts) {
+    this.allowHttpHosts = allowHttpHosts;
     const next = new Map<string, GitDefinition>();
     const issues: Problem[] = [];
     for (const source of sources) {
@@ -68,10 +70,11 @@ export class GitRegistry {
         if (seen.has(stem)) continue; // .yaml before .yml before .json
         seen.add(stem);
         try {
-          const definition = parseDefinition(readFileSync(path.join(this.dir(source), base), "utf8"), base);
+          const definition = parseDefinition(readFileSync(path.join(this.dir(source), base), "utf8"), base, allowHttpHosts);
           if (!next.has(definition.name)) next.set(definition.name, { ...definition, origin });
         } catch (error) {
           issues.push({ origin, file: base, message: describe(error) });
+          console.warn(`mcp-proxy: ignoring ${origin} ${base}: ${describe(error)}`);
         }
       }
     }

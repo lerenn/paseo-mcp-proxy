@@ -37,5 +37,7 @@ export const sourcesSettings = defineSettings({
     sources: z.array(gitSourceSchema).default([]),
     /** Registry names (comma or space separated) or `*` attached to every new agent that does not set PASEO_MCP_SERVERS. Empty: none. */
     defaultServers: z.string().default(""),
+    /** Host globs (`*` matches any run of characters) whose servers may use plain http://. Loopback is always allowed. */
+    allowHttpHosts: z.array(z.string().trim().min(1)).default(["*.svc", "*.svc.cluster.local"]),
   }),
 });

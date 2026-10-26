@@ -35,6 +35,8 @@ export function McpProxyScreen({ theme, layout }: PluginScreenProps) {
       {query.data?.endpoint.error ? <Text style={styles.error}>{query.data.endpoint.error}</Text> : null}
       {query.error ? <Text style={styles.error}>{(query.error as Error).message}</Text> : null}
 
+      {(query.data?.problems ?? []).map((p) => <Text key={`${p.origin}/${p.file}`} style={styles.error}>Ignored {p.origin} {p.file}: {p.message}</Text>)}
+
       <View style={styles.rows}>
         {servers.length === 0 ? <Text style={[styles.muted, styles.pad]}>No servers yet.</Text> : null}
         {servers.map((s, i) => <ServerRow key={s.name} server={s} first={i === 0} styles={styles} theme={theme} onChanged={reload} />)}
@@ -271,7 +273,6 @@ function Sources({ styles, sources, problems, onChanged }: { styles: Styles; sou
           {s.label}: {s.syncing ? "syncing…" : `synced ${ago(s.lastSync)}`}{s.error ? `. Last sync failed, using the previous copy: ${s.error}` : ""}
         </Text>
       ))}
-      {problems.map((p) => <Text key={`${p.origin}/${p.file}`} style={styles.error}>{p.origin} {p.file}: {p.message}</Text>)}
       <>
         <View style={styles.form}>
           <Text style={styles.muted}>
