@@ -4,7 +4,7 @@ import type { ServerView } from "../shared/server";
 import * as oauth from "./oauth";
 import { AuthRequired, type Credentials } from "./upstream";
 import type { ServerRecord, ServerStore } from "./store";
-import { validateHeader, validateName, validateUrl } from "./validate";
+import { DEFAULT_HTTP_HOSTS, validateHeader, validateName, validateUrl } from "./validate";
 
 const PENDING_TTL_MS = 10 * 60_000;
 
@@ -34,6 +34,7 @@ export class ProxyService {
     private readonly creds: Credentials,
     private readonly endpoint: () => string | null,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly allowHttpHosts: () => string[] = () => DEFAULT_HTTP_HOSTS,
   ) {}
 
   views(): ServerView[] {
@@ -44,7 +45,7 @@ export class ProxyService {
 
   add(input: AddInput) {
     const name = validateName(input.name);
-    const url = validateUrl(input.url);
+    const url = validateUrl(input.url, this.allowHttpHosts());
     const header = input.auth === "api-key" ? validateHeader(input.header?.trim() || "Authorization") : undefined;
     const instructions = input.instructions?.trim() || undefined;
     if (input.auth !== "api-key") return this.store.add({ name, url, auth: input.auth, instructions });

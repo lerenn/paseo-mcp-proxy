@@ -86,6 +86,19 @@ describe("git-defined servers", () => {
     expect(JSON.stringify(problems)).not.toContain("sk-oops");
   });
 
+  it("accepts an in-cluster http URL from git, and reports a rejected one", async () => {
+    const t = await setup({
+      "cluster.yaml": "name: cluster\nurl: http://github-mcp.github-mcp.svc.cluster.local:8082/x/all\nauth: none\n",
+      "outside.yaml": "name: outside\nurl: http://example.com/mcp\nauth: none\n",
+    });
+    await t.gitSources.sync(t.source);
+    expect(t.store.names()).toEqual(["cluster"]);
+    expect(t.registry.problems().map((p) => p.file)).toEqual(["outside.yaml"]);
+    t.registry.reload([t.source], []);
+    expect(t.store.names()).toEqual([]);
+    expect(t.registry.problems().map((p) => p.file)).toEqual(["cluster.yaml", "outside.yaml"]);
+  });
+
   it("lets git win over a server added on the screen, and earlier sources win over later ones", async () => {
     const t = await setup({ "linear.yaml": LINEAR });
     t.service.add({ name: "local", url: "https://l.example/mcp", auth: "none" });

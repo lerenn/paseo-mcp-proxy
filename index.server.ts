@@ -11,6 +11,7 @@ import { Credentials } from "./server/upstream";
 import { CAPABILITY_ENV, parseServerList, requestedServers } from "./shared/plugin";
 import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "./shared/rpc";
 import { sourcesSettings, type GitSource } from "./shared/settings";
+import { DEFAULT_HTTP_HOSTS } from "./server/validate";
 import { sourceLabel } from "./server/git-sync";
 
 const DEFAULT_PORT = 47824;
@@ -19,7 +20,8 @@ export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(sourcesSettings);
   let sources: GitSource[] = [];
   let defaultServers: string[] = [];
-  const gitSources = new GitSources(undefined, undefined, undefined, () => registry.reload(sources));
+  let allowHttpHosts = DEFAULT_HTTP_HOSTS;
+  const gitSources = new GitSources(undefined, undefined, undefined, () => registry.reload(sources, allowHttpHosts));
   const registry = new GitRegistry((source) => gitSources.serversDir(source));
   const store = new ServerStore(registry);
   const sessions = new SessionStore();
@@ -28,19 +30,20 @@ export default function contribute(server: PluginServerContext) {
 
   let url: string | null = null;
   let startError: string | null = null;
-  const service = new ProxyService(store, creds, () => url);
+  const service = new ProxyService(store, creds, () => url, fetch, () => allowHttpHosts);
   const http = new ProxyHttp({ store, sessions, creds, audit, onCallback: (params) => service.finishSignIn(params) });
 
   // Servers defined in git are available as soon as the settings are read, from the last good clones;
   // the first fetch then refreshes them.
-  const apply = (next: GitSource[], defaults = "") => {
+  const apply = (next: GitSource[], defaults = "", httpHosts = DEFAULT_HTTP_HOSTS) => {
+    allowHttpHosts = httpHosts;
     defaultServers = parseServerList(defaults);
     sources = next;
-    registry.reload(sources);
+    registry.reload(sources, allowHttpHosts);
     gitSources.configure(sources);
   };
-  const loaded = settings.read().then((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : ""));
-  const unsubscribe = settings.subscribe((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : ""));
+  const loaded = settings.read().then((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : "", state.status === "ready" ? state.values.allowHttpHosts : undefined));
+  const unsubscribe = settings.subscribe((state) => apply(state.status === "ready" ? state.values.sources : [], state.status === "ready" ? state.values.defaultServers : "", state.status === "ready" ? state.values.allowHttpHosts : undefined));
 
   // Resumed agents keep the URL they were created with, so the port has to be stable.
   const port = Number(process.env.MCP_PROXY_PORT ?? DEFAULT_PORT);
