@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "../shared/rpc";
+import { DISPLAY_NAME_MAX } from "../shared/server";
 import { DEFAULT_SYNC_MINUTES, gitSourceSchema, sourcesSettings, type GitSource } from "../shared/settings";
 import type { AuditEntry, AuthType, ProblemView, ServerView, SourceStatus } from "../shared/server";
 
@@ -65,10 +66,10 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
   const signOut = useRpc(signOutRpc);
   const remove = useRpc(removeRpc);
   const test = useRpc(testRpc);
-  const [panel, setPanel] = useState<"key" | "instructions" | null>(null);
+  const [panel, setPanel] = useState<"key" | "instructions" | "name" | null>(null);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
   const run = (fn: () => Promise<unknown>) => fn().then(onChanged, (e) => setNote({ text: (e as Error).message, bad: true }));
-  const toggle = (p: "key" | "instructions") => setPanel((cur) => (cur === p ? null : p));
+  const toggle = (p: "key" | "instructions" | "name") => setPanel((cur) => (cur === p ? null : p));
   const color = statusColor(server.status, theme);
   const statusText = server.status === "connected" ? "Connected" : server.status === "error" ? "Error" : server.auth === "api-key" ? "Needs Key" : "Needs Sign-In";
 
@@ -77,7 +78,8 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
       <View style={styles.line}>
         <View style={styles.nameBox}>
           <View accessibilityLabel={`Status: ${statusText}`} style={[styles.dot, { backgroundColor: color }]} />
-          <Text style={styles.name} numberOfLines={1}>{server.name}</Text>
+          <Text style={styles.name} numberOfLines={1}>{server.displayName ?? server.name}</Text>
+          {server.displayName ? <Text style={styles.muted} numberOfLines={1} accessibilityLabel={`ID: ${server.name}`}>{server.name}</Text> : null}
           <Text style={styles.badge}>{AUTH_LABEL[server.auth]}</Text>
           {server.origin ? <Text style={styles.badge} accessibilityLabel={`Defined in git: ${server.origin}`}>{server.origin}</Text> : null}
         </View>
@@ -89,6 +91,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
             </>
           ) : null}
           {server.auth === "api-key" ? <Button styles={styles} small label="Replace Key" onPress={() => toggle("key")} /> : null}
+          <Button styles={styles} small label="Rename" onPress={() => toggle("name")} />
           <Button styles={styles} small label="Test" onPress={() => run(async () => { const r = await test({ name: server.name }); setNote({ text: r.message, bad: !r.ok }); })} />
           {server.origin ? null : <Button styles={styles} small label="Notes" onPress={() => toggle("instructions")} />}
           {server.origin ? null : <Button styles={styles} small label="Remove" onPress={() => run(() => remove({ name: server.name }))} />}
@@ -99,6 +102,7 @@ function ServerRow({ server, first, styles, theme, onChanged }: { server: Server
       {note ? <Text style={note.bad ? styles.error : styles.muted}>{note.text}</Text> : null}
       {panel === "key" ? <KeyForm styles={styles} name={server.name} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
       {server.auth === "oauth" && server.signingIn ? <PasteForm styles={styles} name={server.name} onDone={() => { setNote(null); onChanged(); }} onCancel={() => { setNote(null); onChanged(); }} onError={(text) => setNote({ text, bad: true })} /> : null}
+      {panel === "name" ? <DisplayNameForm styles={styles} server={server} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
       {panel === "instructions" ? <InstructionsForm styles={styles} server={server} onDone={() => { setPanel(null); onChanged(); }} onCancel={() => setPanel(null)} /> : null}
     </View>
   );
@@ -150,6 +154,30 @@ function looksLikeCallback(value: string): boolean {
   return /(^|[?&\s])state=[^&\s]+/.test(value) && /(^|[?&\s])(code|error)=[^&\s]+/.test(value);
 }
 
+/** Local display name, stored in the plugin settings so it also works for servers defined in git. Empty goes back to the definition's name, or the ID. */
+function DisplayNameForm({ styles, server, onDone, onCancel }: { styles: Styles; server: ServerView; onDone(): void; onCancel(): void }) {
+  const settings = useSettings(sourcesSettings);
+  const [text, setText] = useState(server.displayName ?? "");
+  const ready = settings.status === "ready";
+  const save = async () => {
+    if (settings.status !== "ready") return;
+    const { [server.name]: _old, ...others } = settings.values.displayNames;
+    const next = text.trim();
+    if (await settings.save({ ...settings.values, displayNames: next ? { ...others, [server.name]: next } : others }, settings.revision)) onDone();
+  };
+  return (
+    <View style={styles.form}>
+      <Text style={styles.muted}>Shown here instead of the ID "{server.name}". Agents still see the ID. Leave empty to use {server.definitionDisplayName ? `"${server.definitionDisplayName}" from the definition` : "the ID"}.</Text>
+      <TextInput style={styles.input} value={text} onChangeText={setText} maxLength={DISPLAY_NAME_MAX} placeholder={server.definitionDisplayName ?? server.name} placeholderTextColor={styles.placeholder.color} accessibilityLabel="Display name" />
+      {settings.status === "ready" && settings.saveError ? <Text style={styles.error}>{settings.saveError}</Text> : null}
+      <View style={styles.actions}>
+        <Button styles={styles} small primary disabled={!ready || (ready && settings.saving)} label="Save" onPress={() => void save()} />
+        <Button styles={styles} small label="Cancel" onPress={onCancel} />
+      </View>
+    </View>
+  );
+}
+
 /** Text added to what the server tells agents about itself. */
 function InstructionsForm({ styles, server, onDone, onCancel }: { styles: Styles; server: ServerView; onDone(): void; onCancel(): void }) {
   const set = useRpc(setInstructionsRpc);
@@ -173,13 +201,14 @@ const AUTHS: AuthType[] = ["oauth", "api-key", "none"];
 function AddForm({ styles, onCancel, onSaved }: { styles: Styles; onCancel(): void; onSaved(): void }) {
   const add = useRpc(addRpc);
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [url, setUrl] = useState("");
   const [auth, setAuth] = useState<AuthType>("oauth");
   const [header, setHeader] = useState("");
   const [apiKey, setApiKey] = useState("");
   const ready = name.trim() && url.trim() && (auth !== "api-key" || apiKey.trim());
   const save = useMutation({
-    mutationFn: () => add({ name, url, auth, header: auth === "api-key" ? header : undefined, apiKey: auth === "api-key" ? apiKey : undefined }),
+    mutationFn: () => add({ name, displayName: displayName.trim() || undefined, url, auth, header: auth === "api-key" ? header : undefined, apiKey: auth === "api-key" ? apiKey : undefined }),
     onSuccess: () => { setApiKey(""); onSaved(); },
   });
   const field = (props: React.ComponentProps<typeof TextInput>) => <TextInput {...props} style={styles.input} placeholderTextColor={styles.placeholder.color} autoCapitalize="none" autoCorrect={false} />;
@@ -187,6 +216,7 @@ function AddForm({ styles, onCancel, onSaved }: { styles: Styles; onCancel(): vo
     <View style={styles.panel}>
       <Text style={styles.heading}>Add Server</Text>
       {field({ value: name, onChangeText: setName, placeholder: "Name, e.g. linear", accessibilityLabel: "Server name" })}
+      {field({ value: displayName, onChangeText: setDisplayName, placeholder: "Display name (optional), e.g. Linear", accessibilityLabel: "Display name" })}
       {field({ value: url, onChangeText: setUrl, placeholder: "URL, e.g. https://mcp.linear.app/mcp", accessibilityLabel: "Server URL" })}
       <View style={styles.actions}>
         {AUTHS.map((a) => (

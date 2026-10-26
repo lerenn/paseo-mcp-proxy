@@ -28,6 +28,10 @@ export type AuthConfig =
 /** A server as the proxy uses it: its definition plus the secrets kept for its name. */
 export interface ServerRecord {
   name: string;
+  /** Effective label: local override, else the definition's; null when neither is set. */
+  displayName: string | null;
+  /** The definition's own label, without the local override. */
+  definitionDisplayName: string | null;
   url: string;
   instructions: string;
   auth: AuthConfig;
@@ -56,11 +60,18 @@ export const defaultSecretsPath = () => path.join(home(), "secrets.json");
  * pointing a name somewhere else never sends the old credentials there.
  */
 export class ServerStore {
+  /** Local display names by server name (from the plugin settings); they win over the definitions'. */
+  private overrides: Record<string, string> = {};
+
   constructor(
     private readonly git: Pick<GitRegistry, "get" | "all"> | null = null,
     private readonly definitionsFile: string = defaultDefinitionsPath(),
     private readonly secretsFile: string = defaultSecretsPath(),
   ) {}
+
+  setDisplayNames(names: Record<string, string>) {
+    this.overrides = Object.fromEntries(Object.entries(names).map(([k, v]) => [k.toLowerCase(), v.trim()]).filter(([, v]) => v));
+  }
 
   private local(): Record<string, Definition> {
     return readJson(this.definitionsFile, {});
@@ -76,7 +87,7 @@ export class ServerStore {
     if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
     else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
     else auth = { type: "none" };
-    return { name: def.name, url: def.url, instructions: def.instructions ?? "", auth, lastError: mine?.lastError ?? null, origin };
+    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {

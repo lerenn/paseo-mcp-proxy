@@ -19,6 +19,7 @@ export const addRpc = defineRpc({
   name: "mcp-proxy.add",
   input: z.object({
     name: z.string(),
+    displayName: z.string().optional(),
     url: z.string(),
     auth: authTypeSchema,
     header: z.string().optional(),

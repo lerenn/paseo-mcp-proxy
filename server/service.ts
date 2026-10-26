@@ -1,6 +1,6 @@
 import { timeout } from "./files";
 import { randomBytes } from "node:crypto";
-import type { ServerView } from "../shared/server";
+import { displayNameSchema, type ServerView } from "../shared/server";
 import * as oauth from "./oauth";
 import { AuthRequired, type Credentials } from "./upstream";
 import type { ServerRecord, ServerStore } from "./store";
@@ -16,6 +16,7 @@ interface Pending {
 
 export interface AddInput {
   name: string;
+  displayName?: string;
   url: string;
   auth: "none" | "api-key" | "oauth";
   header?: string;
@@ -48,9 +49,10 @@ export class ProxyService {
     const url = validateUrl(input.url, this.allowHttpHosts());
     const header = input.auth === "api-key" ? validateHeader(input.header?.trim() || "Authorization") : undefined;
     const instructions = input.instructions?.trim() || undefined;
-    if (input.auth !== "api-key") return this.store.add({ name, url, auth: input.auth, instructions });
+    const displayName = input.displayName?.trim() ? displayNameSchema.parse(input.displayName) : undefined;
+    if (input.auth !== "api-key") return this.store.add({ name, displayName, url, auth: input.auth, instructions });
     const key = cleanKey(input.apiKey);
-    this.store.add({ name, url, auth: "api-key", header, instructions }, { apiKey: key, prefix: prefixFor(header!, key) });
+    this.store.add({ name, displayName, url, auth: "api-key", header, instructions }, { apiKey: key, prefix: prefixFor(header!, key) });
   }
 
   remove(name: string) {
@@ -242,6 +244,8 @@ export function view(r: ServerRecord, signingIn: boolean): ServerView {
   }
   return {
     name: r.name,
+    displayName: r.displayName,
+    definitionDisplayName: r.definitionDisplayName,
     url: r.url,
     auth: r.auth.type,
     header: r.auth.type === "api-key" ? r.auth.header : null,

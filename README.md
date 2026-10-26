@@ -56,6 +56,7 @@ One file per server in the folder, named `<name>.yaml` (or `.yml`, `.json`):
 
 ```yaml
 name: sentry               # must match the file name; lowercase letters, digits, dashes
+displayName: Sentry          # optional label for the screen (64 characters at most); agents never see it
 url: https://mcp.sentry.dev/mcp
 auth: api-key              # none | api-key | oauth
 header: X-Sentry-Key       # api-key only; default Authorization (sent as "Bearer <key>")
@@ -66,6 +67,16 @@ instructions: |            # optional, added to what agents see
 Unknown fields are rejected, so a `key:` or `token:` line makes the file invalid instead of being ignored;
 an invalid file is skipped and shown on the screen with the reason, and valid files still load. `http://` URLs
 are only accepted for localhost.
+
+### Display names
+
+The screen shows `displayName` instead of the ID, with the ID as secondary text; with none set it shows the
+ID. A name can come from the definition file (`displayName:`) or from a local override set with **Rename**,
+which is stored in this plugin's host settings (`displayNames`, keyed by ID). The override wins, and clearing
+it falls back to the definition's name. Overrides live in settings rather than in `servers.json` because
+git-defined servers are read-only and a label is a per-machine preference, not part of the definition.
+Display names are labels only: the ID stays the server's name in `PASEO_MCP_SERVERS`, the proxy URL and the
+agent's MCP config.
 
 ## Giving agents servers: the `PASEO_MCP_SERVERS` contract
 
