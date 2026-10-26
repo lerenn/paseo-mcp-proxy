@@ -25,6 +25,12 @@ export type AuthConfig =
   | { type: "api-key"; header: string; prefix: string; key: string | null }
   | { type: "oauth"; oauth: OAuthState | null };
 
+/** Pre-registered OAuth client values entered on the screen. They win over the definition's references. Secret. */
+export interface StoredClient {
+  clientId?: string;
+  clientSecret?: string;
+}
+
 /** A server as the proxy uses it: its definition plus the secrets kept for its name. */
 export interface ServerRecord {
   name: string;
@@ -36,6 +42,8 @@ export interface ServerRecord {
   instructions: string;
   /** Pre-registered OAuth client references (never values), for oauth servers. */
   oauthClient: OAuthClient | null;
+  /** Client values entered on the screen for this server (empty when none). Never sent to the screen. */
+  storedClient: StoredClient;
   auth: AuthConfig;
   /** Last failure to authenticate or reach the server; cleared on success. */
   lastError?: string | null;
@@ -49,6 +57,7 @@ interface Secrets {
   apiKey?: string;
   prefix?: string;
   oauth?: OAuthState;
+  client?: StoredClient;
   lastError?: string | null;
 }
 
@@ -89,7 +98,7 @@ export class ServerStore {
     if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
     else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
     else auth = { type: "none" };
-    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, auth, lastError: mine?.lastError ?? null, origin };
+    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, storedClient: def.auth === "oauth" ? mine?.client ?? {} : {}, auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {
@@ -138,7 +147,10 @@ export class ServerStore {
     if (next.auth.type === "api-key") {
       if (next.auth.key) secrets.apiKey = next.auth.key;
       if (next.auth.prefix) secrets.prefix = next.auth.prefix;
-    } else if (next.auth.type === "oauth" && next.auth.oauth) secrets.oauth = next.auth.oauth;
+    } else if (next.auth.type === "oauth") {
+      if (next.auth.oauth) secrets.oauth = next.auth.oauth;
+      if (next.storedClient.clientId || next.storedClient.clientSecret) secrets.client = next.storedClient;
+    }
     const previous = this.secrets()[current.name];
     // An unchanged error state must not rewrite the file on every request.
     if (previous && JSON.stringify(previous) === JSON.stringify(secrets)) return;

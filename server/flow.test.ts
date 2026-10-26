@@ -169,6 +169,50 @@ describe("pre-registered OAuth client", () => {
   });
 });
 
+describe("pre-registered OAuth client entered on the screen", () => {
+  async function entered(refs: boolean) {
+    const up = await upstream({ noRegistration: true });
+    const t = await setup(up);
+    const file = path.join(t.dir, "missing.json");
+    t.store.add({ name: "slack", url: `${up.url}/mcp`, auth: "oauth", oauthClient: { clientIdRef: `file:${file}#client_id`, ...(refs ? { clientSecretRef: `file:${file}#secret` } : {}) } });
+    return { up, t, file };
+  }
+
+  it("signs in with stored values when the file ref does not exist, and never reveals them", async () => {
+    const { up, t } = await entered(true);
+    await expect(t.service.signIn("slack")).rejects.toThrow(/does not exist/);
+    t.service.setOAuthClient("slack", { clientId: "ui-id", clientSecret: "ui-s3cret" });
+    expect(t.service.views()[0]).toMatchObject({ clientIdSet: true, clientSecretSet: true });
+    expect(JSON.stringify(t.service.views())).not.toContain("ui-s3cret");
+    const authUrl = new URL(await t.service.signIn("slack"));
+    expect(authUrl.searchParams.get("client_id")).toBe("ui-id");
+    await fetch(authUrl);
+    await fetch(`${t.base}/oauth/callback?code=the-code&state=${authUrl.searchParams.get("state")}`);
+    expect(new URLSearchParams(up.seen.find((s) => s.url === "/token")!.body).get("client_secret")).toBe("ui-s3cret");
+    // The grant being saved must not drop the stored client.
+    expect(t.store.get("slack")!.storedClient).toEqual({ clientId: "ui-id", clientSecret: "ui-s3cret" });
+    expect(t.service.views()[0].status).toBe("connected");
+    expect(readFileSync(path.join(t.dir, "secrets.json"), "utf8")).toContain("ui-s3cret");
+    expect(statSync(path.join(t.dir, "secrets.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the other value when only one is replaced, and rejects empty or multi-line input", async () => {
+    const { t } = await entered(true);
+    t.service.setOAuthClient("slack", { clientId: " ui-id ", clientSecret: "one" });
+    t.service.setOAuthClient("slack", { clientSecret: "two" });
+    expect(t.store.get("slack")!.storedClient).toEqual({ clientId: "ui-id", clientSecret: "two" });
+    expect(() => t.service.setOAuthClient("slack", { clientId: "  " })).toThrow(/Enter a client ID/);
+    expect(() => t.service.setOAuthClient("slack", { clientSecret: "a\nb" })).toThrow(/line breaks/);
+  });
+
+  it("refuses servers without a pre-registered client", async () => {
+    const up = await upstream();
+    const t = await setup(up);
+    t.service.add({ name: "demo", url: `${up.url}/mcp`, auth: "oauth" });
+    expect(() => t.service.setOAuthClient("demo", { clientId: "x" })).toThrow(/pre-registered/);
+  });
+});
+
 describe("pasted callback", () => {
   async function pending() {
     const up = await upstream();

@@ -29,6 +29,10 @@ export const serverViewSchema = z.object({
   header: z.string().nullable(),
   /** The server signs in with a pre-registered OAuth client (no dynamic registration). */
   preRegistered: z.boolean(),
+  /** A client ID was entered on the screen. The value is never sent back. */
+  clientIdSet: z.boolean(),
+  /** A client secret was entered on the screen. The value is never sent back. */
+  clientSecretSet: z.boolean(),
   /** Text added to the MCP `instructions` agents see. */
   instructions: z.string(),
   status: statusSchema,

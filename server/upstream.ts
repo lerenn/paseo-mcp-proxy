@@ -59,8 +59,8 @@ export class Credentials {
     const wait = this.backoff.get(name);
     if (wait && wait.until > Date.now()) throw new Error(wait.message);
     try {
-      const def = this.store.get(name)?.oauthClient;
-      const tokens = await oauth.refresh(state, this.fetchImpl, def ? oauth.resolveClient(def) : undefined);
+      const record = this.store.get(name);
+      const tokens = await oauth.refresh(state, this.fetchImpl, record?.oauthClient ? oauth.resolveClient(record.oauthClient, record.storedClient) : undefined);
       this.save(name, (s) => ({
         ...s,
         accessToken: tokens.accessToken,

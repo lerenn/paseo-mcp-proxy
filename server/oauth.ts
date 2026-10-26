@@ -132,9 +132,10 @@ export interface ClientAuth {
   method: "client_secret_post" | "client_secret_basic" | "none";
 }
 
-export function resolveClient(def: OAuthClient): ClientAuth {
-  const clientSecret = def.clientSecretRef ? resolveRef(def.clientSecretRef) : undefined;
-  return { clientId: resolveRef(def.clientIdRef), clientSecret, method: def.tokenEndpointAuth ?? (clientSecret ? "client_secret_post" : "none") };
+/** Values entered on the screen win over the definition's references; a reference is only read for what is not stored. */
+export function resolveClient(def: OAuthClient, stored: { clientId?: string; clientSecret?: string } = {}): ClientAuth {
+  const clientSecret = stored.clientSecret ?? (def.clientSecretRef ? resolveRef(def.clientSecretRef) : undefined);
+  return { clientId: stored.clientId ?? resolveRef(def.clientIdRef), clientSecret, method: def.tokenEndpointAuth ?? (clientSecret ? "client_secret_post" : "none") };
 }
 
 export interface Pkce {
