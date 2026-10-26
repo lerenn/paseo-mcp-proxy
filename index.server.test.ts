@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { tmp } from "./server/testing";
@@ -99,5 +99,24 @@ describe("plugin wiring", () => {
       setDefaults("");
       expect(await create({})).toBeUndefined();
     });
+  });
+
+  it("stores the OAuth client from the screen and never returns the secret", async () => {
+    const dir = path.join(home, ".paseo", "mcp-proxy");
+    const defs = JSON.parse(readFileSync(path.join(dir, "servers.json"), "utf8"));
+    defs.slackish = { name: "slackish", url: "https://slack.example/mcp", auth: "oauth", oauthClient: { clientIdRef: "env:NOPE_ID", clientSecretRef: "env:NOPE_SECRET" } };
+    writeFileSync(path.join(dir, "servers.json"), JSON.stringify(defs));
+    const logs = vi.spyOn(console, "log");
+    const errors = vi.spyOn(console, "error");
+    const set = await rpcs.get("mcp-proxy.set-oauth-client")!({ name: "slackish", clientId: "ui-client-id", clientSecret: "ui-top-secret" });
+    const listed = await rpcs.get("mcp-proxy.list")!({});
+    expect(JSON.stringify([set, listed])).not.toContain("ui-top-secret");
+    expect(listed.servers.find((s: { name: string }) => s.name === "slackish")).toMatchObject({ clientIdSet: true, clientSecretSet: true });
+    await expect(async () => rpcs.get("mcp-proxy.set-oauth-client")!({ name: "slackish", clientSecret: "x\ny-leaked" })).rejects.toThrow();
+    const err = await (async () => rpcs.get("mcp-proxy.set-oauth-client")!({ name: "linear", clientSecret: "ui-top-secret" }))().catch((e: Error) => e);
+    expect((err as Error).message).not.toContain("ui-top-secret");
+    expect(JSON.stringify([...logs.mock.calls, ...errors.mock.calls])).not.toContain("ui-top-secret");
+    logs.mockRestore();
+    errors.mockRestore();
   });
 });

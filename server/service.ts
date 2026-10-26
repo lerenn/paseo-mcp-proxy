@@ -69,6 +69,16 @@ export class ProxyService {
     this.store.update(name, (r) => ({ ...r, lastError: null, auth: { type: "api-key", header, prefix: prefixFor(header, key), key } }));
   }
 
+  /** Store the pre-registered client entered on the screen. Allowed for git-managed servers: the secret is never in git. */
+  setOAuthClient(name: string, input: { clientId?: string; clientSecret?: string }) {
+    const record = this.require(name);
+    if (record.auth.type !== "oauth" || !record.oauthClient) throw new Error(`"${name}" does not use a pre-registered OAuth client`);
+    const clientId = cleanValue(input.clientId, "client ID");
+    const clientSecret = cleanValue(input.clientSecret, "client secret");
+    if (!clientId && !clientSecret) throw new Error("Enter a client ID or a client secret");
+    this.store.update(name, (r) => ({ ...r, lastError: null, storedClient: { ...r.storedClient, ...(clientId ? { clientId } : {}), ...(clientSecret ? { clientSecret } : {}) } }));
+  }
+
   setInstructions(name: string, instructions: string) {
     this.store.setInstructions(name, instructions.trim());
   }
@@ -94,7 +104,7 @@ export class ProxyService {
     const preset = record.oauthClient;
     if (preset?.scopes) info.scope = preset.scopes.join(" ");
     const client = preset
-      ? { clientId: oauth.resolveClient(preset).clientId, clientSecret: undefined }
+      ? { clientId: oauth.resolveClient(preset, record.storedClient).clientId, clientSecret: undefined }
       : known && known.redirectUri === redirectUri && known.tokenEndpoint === info.tokenEndpoint
         ? { clientId: known.clientId, clientSecret: known.clientSecret }
         : await oauth.register(info, redirectUri, this.fetchImpl);
@@ -129,7 +139,7 @@ export class ProxyService {
     const record = this.store.get(pending.name);
     if (!record || record.auth.type !== "oauth" || !record.auth.oauth) return { ok: false, message: "The server was removed during sign-in." };
     try {
-      const tokens = await oauth.exchangeCode(record.auth.oauth, code, pending.verifier, this.fetchImpl, record.oauthClient ? oauth.resolveClient(record.oauthClient) : undefined);
+      const tokens = await oauth.exchangeCode(record.auth.oauth, code, pending.verifier, this.fetchImpl, record.oauthClient ? oauth.resolveClient(record.oauthClient, record.storedClient) : undefined);
       this.store.update(pending.name, (r) =>
         r.auth.type === "oauth" && r.auth.oauth
           ? { ...r, lastError: null, auth: { type: "oauth", oauth: { ...r.auth.oauth, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken ?? r.auth.oauth.refreshToken, expiresAt: tokens.expiresAt } } }
@@ -233,6 +243,13 @@ function cleanKey(raw: string | undefined): string {
   return key;
 }
 
+function cleanValue(raw: string | undefined, what: string): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (/[\r\n]/.test(value)) throw new Error(`The ${what} cannot contain line breaks`);
+  return value;
+}
+
 export function view(r: ServerRecord, signingIn: boolean): ServerView {
   let status: ServerView["status"] = "connected";
   let detail: string | null = null;
@@ -254,6 +271,8 @@ export function view(r: ServerRecord, signingIn: boolean): ServerView {
     auth: r.auth.type,
     header: r.auth.type === "api-key" ? r.auth.header : null,
     preRegistered: r.oauthClient !== null,
+    clientIdSet: r.storedClient.clientId !== undefined,
+    clientSecretSet: r.storedClient.clientSecret !== undefined,
     instructions: r.instructions,
     status,
     detail,

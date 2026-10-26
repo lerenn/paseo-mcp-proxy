@@ -9,7 +9,7 @@ import { SessionStore } from "./server/sessions";
 import { ServerStore } from "./server/store";
 import { Credentials } from "./server/upstream";
 import { CAPABILITY_ENV, parseServerList, requestedServers } from "./shared/plugin";
-import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "./shared/rpc";
+import { addRpc, auditRpc, cancelSignInRpc, completeSignInRpc, listRpc, removeRpc, setInstructionsRpc, setKeyRpc, setOAuthClientRpc, signInRpc, signOutRpc, syncRpc, testRpc } from "./shared/rpc";
 import { sourcesSettings, type GitSource } from "./shared/settings";
 import { DEFAULT_HTTP_HOSTS } from "./server/validate";
 import { sourceLabel } from "./server/git-sync";
@@ -85,6 +85,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(addRpc, (input) => (service.add(input), {}));
   server.handle(removeRpc, ({ name }) => (service.remove(name), {}));
   server.handle(setKeyRpc, ({ name, apiKey }) => (service.setKey(name, apiKey), {}));
+  server.handle(setOAuthClientRpc, ({ name, clientId, clientSecret }) => (service.setOAuthClient(name, { clientId, clientSecret }), {}));
   server.handle(setInstructionsRpc, ({ name, instructions }) => (service.setInstructions(name, instructions), {}));
   server.handle(signInRpc, async ({ name }) => ({ url: await service.signIn(name) }));
   server.handle(cancelSignInRpc, async ({ name }) => (service.cancelSignIn(name), {}));

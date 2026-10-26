@@ -37,6 +37,13 @@ export const setKeyRpc = defineRpc({
   output: z.object({}),
 });
 
+/** Store the pre-registered OAuth client entered on the screen. Both values are stored and never returned. */
+export const setOAuthClientRpc = defineRpc({
+  name: "mcp-proxy.set-oauth-client",
+  input: z.object({ name: z.string(), clientId: z.string().optional(), clientSecret: z.string().optional() }),
+  output: z.object({}),
+});
+
 export const setInstructionsRpc = defineRpc({
   name: "mcp-proxy.set-instructions",
   input: z.object({ name: z.string(), instructions: z.string() }),
