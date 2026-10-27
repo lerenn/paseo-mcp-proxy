@@ -39,7 +39,7 @@ export const sourcesSettings = defineSettings({
     /** Registry names (comma or space separated) or `*` attached to every new agent that does not set PASEO_MCP_SERVERS. Empty: none. */
     defaultServers: z.string().default(""),
     /**
-     * Servers attached to a new agent by its labels, whatever PASEO_MCP_SERVERS says: `{"paseo.prbr=1": "annie-prod-sql, launchdarkly"}`.
+     * Servers attached to a new agent by its labels, whatever PASEO_MCP_SERVERS says: `{"paseo.prbr=1": "sql-annie-prod, launchdarkly"}`.
      * A bare key matches any value. Anyone who can create an agent with the label gets the servers, so use it for
      * labels that only trusted creators set.
      */
