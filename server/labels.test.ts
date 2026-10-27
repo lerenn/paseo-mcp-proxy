@@ -9,9 +9,9 @@ import { listen, send, tmp } from "./testing";
 import path from "node:path";
 
 describe("labelServers", () => {
-  const rules = { "paseo.prbr=1": "annie-prod-sql, launchdarkly", "paseo.any": "extra", "team=a": "a-only" };
+  const rules = { "paseo.prbr=1": "sql-annie-prod, launchdarkly", "paseo.any": "extra", "team=a": "a-only" };
   it("grants servers by label, a bare key matching any value", () => {
-    expect(serversForLabels({ "paseo.prbr": "1" }, rules)).toEqual(["annie-prod-sql", "launchdarkly"]);
+    expect(serversForLabels({ "paseo.prbr": "1" }, rules)).toEqual(["sql-annie-prod", "launchdarkly"]);
     expect(serversForLabels({ "paseo.prbr": "0" }, rules)).toEqual([]);
     expect(serversForLabels({ "paseo.any": "whatever", "team": "a" }, rules)).toEqual(["extra", "a-only"]);
     expect(serversForLabels(undefined, rules)).toEqual([]);
@@ -19,10 +19,10 @@ describe("labelServers", () => {
 
   it("adds them to what the agent asked for, even when it opted out of the defaults", () => {
     const request = { config: { cwd: "/x" }, env: { PASEO_MCP_SERVERS: "none" } } as never;
-    const out = attachServers(request, { url: "http://127.0.0.1:1", registered: ["annie-prod-sql", "linear"], extra: ["annie-prod-sql", "launchdarkly"], capability: (g) => g.join("+") }) as never as { config: { mcpServers: Record<string, unknown>; systemPrompt: string }; env: Record<string, string> };
-    expect(Object.keys(out.config.mcpServers)).toEqual(["annie-prod-sql"]);
+    const out = attachServers(request, { url: "http://127.0.0.1:1", registered: ["sql-annie-prod", "linear"], extra: ["sql-annie-prod", "launchdarkly"], capability: (g) => g.join("+") }) as never as { config: { mcpServers: Record<string, unknown>; systemPrompt: string }; env: Record<string, string> };
+    expect(Object.keys(out.config.mcpServers)).toEqual(["sql-annie-prod"]);
     expect(out.config.systemPrompt).toContain("launchdarkly"); // requested but not configured: said so
-    expect(out.env.PASEO_MCP_PROXY_CAPABILITY).toBe("annie-prod-sql");
+    expect(out.env.PASEO_MCP_PROXY_CAPABILITY).toBe("sql-annie-prod");
   });
 });
 

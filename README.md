@@ -105,7 +105,7 @@ It is how a write tool is kept out of reach of an agent that only needs to read;
 ## Giving agents servers by label
 
 The `labelServers` setting grants servers to a new agent by its labels, on top of `PASEO_MCP_SERVERS` and the defaults
-(and even when the agent set `PASEO_MCP_SERVERS=none`): `{"paseo.prbr=1": "annie-prod-sql, launchdarkly"}`. A bare key
+(and even when the agent set `PASEO_MCP_SERVERS=none`): `{"paseo.prbr=1": "sql-annie-prod, launchdarkly"}`. A bare key
 matches any value. It works at creation, so an agent that already exists keeps the servers it was created with; create it again with
 the label. Anyone who can create an agent with the label gets the servers, so use labels only trusted creators set. It needs a
 daemon that gives plugins the agent's labels at creation (without them nothing is granted by label).
