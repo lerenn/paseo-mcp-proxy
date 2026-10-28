@@ -13,6 +13,8 @@ export interface AttachOptions {
   extra?: string[];
   /** Names currently in the registry. */
   registered: string[];
+  /** The registered names `*` grants (all but `explicitOnly` servers); defaults to `registered`. */
+  wildcard?: string[];
   /** Mints the agent's capability for the servers it is granted. */
   capability(granted: string[]): string;
 }
@@ -25,10 +27,13 @@ export interface AttachOptions {
 export function attachServers(request: CreateRequest, o: AttachOptions): CreateRequest | undefined {
   const asked = [...new Set([...requestedServers(request.env, o.defaults), ...(o.extra ?? [])])];
   if (!asked.length) return undefined;
-  const granted = asked.includes(ALL) ? [...o.registered] : asked.filter((n) => o.registered.includes(n));
+  const named = asked.filter((n) => o.registered.includes(n));
+  const wildcard = o.wildcard ?? o.registered;
+  const granted = asked.includes(ALL) ? [...new Set([...wildcard, ...named])] : named;
   const missing = asked.filter((n) => n !== ALL && !o.registered.includes(n));
 
-  const capability = o.capability(asked.includes(ALL) ? [ALL] : granted);
+  // `*` in a capability never covers an explicitOnly server (see ProxyServer), so those are named next to it.
+  const capability = o.capability(asked.includes(ALL) ? [ALL, ...named.filter((n) => !wildcard.includes(n))] : granted);
   const mcpServers: McpServers = { ...(request.config.mcpServers ?? {}) };
   for (const name of granted) {
     // The proxied entry replaces any same-named server: the role asked for it by name.

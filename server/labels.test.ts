@@ -76,3 +76,38 @@ describe("allowTools through the proxy", () => {
     expect(calls).toEqual(["get_pr_blast_review"]); // the refused call never reached the upstream
   });
 });
+
+describe("explicitOnly servers", () => {
+  const registered = ["linear", "aikido", "aikido-admin"];
+  const wildcard = ["linear", "aikido"];
+  type Out = { config: { mcpServers: Record<string, unknown> }; env: Record<string, string> };
+  it("are left out of *", () => {
+    const request = { config: { cwd: "/x" }, env: {} } as never;
+    const out = attachServers(request, { url: "http://127.0.0.1:1", defaults: ["*"], registered, wildcard, capability: (g) => g.join("+") }) as never as Out;
+    expect(Object.keys(out.config.mcpServers)).toEqual(["linear", "aikido"]);
+    expect(out.env.PASEO_MCP_PROXY_CAPABILITY).toBe("*");
+  });
+  it("are granted by name, next to * in the capability", () => {
+    const request = { config: { cwd: "/x" }, env: {} } as never;
+    const out = attachServers(request, { url: "http://127.0.0.1:1", defaults: ["*"], extra: ["aikido-admin"], registered, wildcard, capability: (g) => g.join("+") }) as never as Out;
+    expect(Object.keys(out.config.mcpServers)).toEqual(["linear", "aikido", "aikido-admin"]);
+    expect(out.env.PASEO_MCP_PROXY_CAPABILITY).toBe("*+aikido-admin");
+  });
+});
+
+describe("explicitOnly at the proxy", () => {
+  it("refuses a * capability and serves one that names the server", async () => {
+    const record = { name: "aikido-admin", displayName: null, definitionDisplayName: null, url: "http://127.0.0.1:9/mcp", instructions: "", allowTools: null, explicitOnly: true, oauthClient: null, auth: { type: "none" }, origin: "x" } as ServerRecord;
+    const dir = tmp();
+    const sessions = new SessionStore(path.join(dir, "sessions.json"));
+    const http = new ProxyHttp({ store: { get: () => record } as unknown as ServerStore, sessions, creds: { headers: async () => ({}), setError: () => undefined } as never, audit: new AuditLog(path.join(dir, "audit.jsonl")), onCallback: async () => ({ ok: true, message: "" }) });
+    const base = await http.start(0);
+    try {
+      const status = (token: string) => fetch(`${base}/s/aikido-admin/mcp`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }).then((r) => r.status);
+      expect(await status(sessions.create(["*"]))).toBe(403);
+      expect(await status(sessions.create(["*", "aikido-admin"]))).not.toBe(403);
+    } finally {
+      await http.stop();
+    }
+  });
+});

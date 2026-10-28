@@ -42,6 +42,8 @@ export interface ServerRecord {
   instructions: string;
   /** The tools agents may use (see the definition's `allowTools`); null allows all. */
   allowTools: string[] | null;
+  /** Never granted by `*` (see the definition's `explicitOnly`). */
+  explicitOnly: boolean;
   /** Pre-registered OAuth client references (never values), for oauth servers. */
   oauthClient: OAuthClient | null;
   /** Client values entered on the screen for this server (empty when none). Never sent to the screen. */
@@ -100,7 +102,7 @@ export class ServerStore {
     if (def.auth === "api-key") auth = { type: "api-key", header: def.header ?? "Authorization", prefix: mine?.prefix ?? "", key: mine?.apiKey ?? null };
     else if (def.auth === "oauth") auth = { type: "oauth", oauth: mine?.oauth ?? null };
     else auth = { type: "none" };
-    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", allowTools: def.allowTools ?? null, oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, storedClient: def.auth === "oauth" ? mine?.client ?? {} : {}, auth, lastError: mine?.lastError ?? null, origin };
+    return { name: def.name, displayName: this.overrides[def.name] ?? def.displayName ?? null, definitionDisplayName: def.displayName ?? null, url: def.url, instructions: def.instructions ?? "", allowTools: def.allowTools ?? null, explicitOnly: def.explicitOnly === true, oauthClient: def.auth === "oauth" ? def.oauthClient ?? null : null, storedClient: def.auth === "oauth" ? mine?.client ?? {} : {}, auth, lastError: mine?.lastError ?? null, origin };
   }
 
   list(): ServerRecord[] {
@@ -121,6 +123,11 @@ export class ServerStore {
 
   names(): string[] {
     return this.list().map((s) => s.name);
+  }
+
+  /** Names `*` grants: every server but the `explicitOnly` ones. */
+  wildcardNames(): string[] {
+    return this.list().filter((s) => !s.explicitOnly).map((s) => s.name);
   }
 
   /** Add a server on the screen. Refuses a name that exists, in git or locally. */

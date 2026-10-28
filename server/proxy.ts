@@ -97,8 +97,10 @@ export class ProxyHttp {
     const session = this.deps.sessions.resolve(bearer);
     if (!session) return json(res, 401, { error: "unknown or expired capability; recreate the agent" });
     const name = match[1];
-    if (!session.servers.includes("*") && !session.servers.includes(name)) return json(res, 403, { error: `this agent was not given access to "${name}"` });
     const record = this.deps.store.get(name);
+    // `*` never covers an explicitOnly server: it must be granted by name.
+    const wildcard = session.servers.includes("*") && !(record?.explicitOnly ?? false);
+    if (!wildcard && !session.servers.includes(name)) return json(res, 403, { error: `this agent was not given access to "${name}"` });
     if (!record) return json(res, 404, { error: `"${name}" is no longer registered in MCP Proxy` });
     if (!["POST", "GET", "DELETE"].includes(req.method ?? "")) return json(res, 405, { error: "method not allowed" });
     await this.forward(req, res, record, session);

@@ -46,6 +46,11 @@ export const definitionSchema = z
      * in `tools/call`, whatever the upstream offers. Omit to allow all. This is how a write tool is kept out of reach.
      */
     allowTools: z.array(z.string().trim().min(1)).optional(),
+    /**
+     * `true`: the server is never part of `*` (in PASEO_MCP_SERVERS, `defaultServers` or an agent's capability). Only an
+     * explicit grant by name (PASEO_MCP_SERVERS, `defaultServers`, `labelServers`) gives it. For servers with write tools.
+     */
+    explicitOnly: z.boolean().optional(),
     /** Text added to the MCP instructions agents see. */
     instructions: z.string().optional(),
   })

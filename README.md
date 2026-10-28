@@ -102,6 +102,10 @@ agent's MCP config.
 `tools/list` and refused in `tools/call` (the call never reaches the upstream), whatever the upstream offers. Leave it out to allow all.
 It is how a write tool is kept out of reach of an agent that only needs to read; to allow it later, edit the file in git.
 
+`explicitOnly: true` keeps a server out of `*`: in `PASEO_MCP_SERVERS`, `defaultServers` and a capability minted for `*`, so
+only a grant by name (`PASEO_MCP_SERVERS`, `defaultServers` or `labelServers`) gives it. Use it for a server whose tools write,
+such as an admin endpoint for one role. Older versions of the plugin reject the field, so the server is not loaded there.
+
 ## Giving agents servers by label
 
 The `labelServers` setting grants servers to a new agent by its labels, on top of `PASEO_MCP_SERVERS` and the defaults

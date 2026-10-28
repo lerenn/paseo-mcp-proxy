@@ -70,7 +70,7 @@ export default function contribute(server: PluginServerContext) {
     await started;
     // Refuse rather than start an agent that silently lacks the servers its role depends on.
     if (!url) throw new Error(`${startError} Create the agent with PASEO_MCP_SERVERS=none to skip MCP Proxy.`);
-    return attachServers(request, { url, defaults: defaultServers, extra, registered: store.names(), capability: (granted) => sessions.create(granted) });
+    return attachServers(request, { url, defaults: defaultServers, extra, registered: store.names(), wildcard: store.wildcardNames(), capability: (granted) => sessions.create(granted) });
   });
   const removeOpen = server.before("agent.session_open", ({ request }) => {
     const capability = request.env[CAPABILITY_ENV];
