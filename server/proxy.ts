@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import type { AuditLog } from "./audit";
+import { PLUGIN_CALLER_HEADER, type PluginCapability } from "./plugin-api";
 import type { AgentSession, SessionStore } from "./sessions";
 import type { ServerRecord, ServerStore } from "./store";
 import { AuthRequired, type Credentials } from "./upstream";
@@ -51,6 +52,8 @@ export class ProxyHttp {
       /** Finish an OAuth sign-in from the redirect's query. */
       onCallback(params: URLSearchParams): Promise<{ ok: boolean; message: string }>;
       fetch?: typeof fetch;
+      /** The in-process capability of other daemon plugins (`callTool`). */
+      plugins?: PluginCapability;
     },
   ) {}
 
@@ -94,9 +97,9 @@ export class ProxyHttp {
     const match = /^\/s\/([a-z][a-z0-9-]*)\/mcp$/.exec(path);
     if (!match) return json(res, 404, { error: "not found" });
     const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
-    const session = this.deps.sessions.resolve(bearer);
-    if (!session) return json(res, 401, { error: "unknown or expired capability; recreate the agent" });
     const name = match[1];
+    const session = this.deps.sessions.resolve(bearer) ?? this.deps.plugins?.session(bearer, name, req.headers[PLUGIN_CALLER_HEADER]) ?? null;
+    if (!session) return json(res, 401, { error: "unknown or expired capability; recreate the agent" });
     const record = this.deps.store.get(name);
     // `*` never covers an explicitOnly server: it must be granted by name.
     const wildcard = session.servers.includes("*") && !(record?.explicitOnly ?? false);

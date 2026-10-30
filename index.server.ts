@@ -3,6 +3,7 @@ import { AuditLog } from "./server/audit";
 import { GitSources } from "./server/git-sync";
 import { GitRegistry } from "./server/registry";
 import { attachServers } from "./server/attach";
+import { createPluginApi, PluginCapability, registerPluginApi } from "./server/plugin-api";
 import { ProxyHttp } from "./server/proxy";
 import { ProxyService } from "./server/service";
 import { SessionStore } from "./server/sessions";
@@ -32,7 +33,10 @@ export default function contribute(server: PluginServerContext) {
   let url: string | null = null;
   let startError: string | null = null;
   const service = new ProxyService(store, creds, () => url, fetch, () => allowHttpHosts);
-  const http = new ProxyHttp({ store, sessions, creds, audit, onCallback: (params) => service.finishSignIn(params) });
+  const plugins = new PluginCapability();
+  const http = new ProxyHttp({ store, sessions, creds, audit, plugins, onCallback: (params) => service.finishSignIn(params) });
+  // Other daemon plugins call tools in-process, with no capability on disk or in an agent's environment.
+  const unregisterApi = registerPluginApi(createPluginApi(() => url, plugins));
 
   // Servers defined in git are available as soon as the settings are read, from the last good clones;
   // the first fetch then refreshes them.
@@ -99,6 +103,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(auditRpc, ({ limit }) => ({ entries: audit.recent(limit) }));
 
   return async () => {
+    unregisterApi();
     removeCreate();
     removeOpen();
     removeArchived();
