@@ -138,6 +138,30 @@ PASEO_MCP_SERVERS=*                 # every server registered now or later
   (the second is how the capability is bound to the agent). Tools are not pre-approved, so the agent's
   own permission mode still applies.
 
+## Calling tools from other daemon plugins
+
+Agents reach servers through their capability; another plugin running in the same daemon calls a tool in-process instead. The
+plugin offers `globalThis[Symbol.for("paseo.mcp-proxy")]` (plugins do not import each other, so the caller repeats the shape):
+
+```ts
+interface McpProxyApi {
+  version: 1;
+  callTool(server: string, tool: string, args?: Record<string, unknown>, options?: { caller?: string; timeoutMs?: number }): Promise<{
+    content?: Array<{ type: string; text?: string }>; structuredContent?: unknown; isError?: boolean;
+  }>;
+}
+```
+
+- The call goes through the proxy's own endpoint with a capability that exists only in the daemon's memory (never on disk nor
+  in an agent's environment), so the stored credential, the OAuth refresh and replay, `allowTools` and the audit log apply as for
+  agents. The audit names the caller `plugin:<caller>`.
+- Every registered server is reachable this way, `explicitOnly` ones included: a plugin runs in the daemon and could read the
+  secrets file anyway.
+- It resolves with the tool result (`isError` included, such as a tool `allowTools` refuses) and rejects when the endpoint is not
+  running, the server is unknown, needs a sign-in or key, cannot be reached, or answers a JSON-RPC error. Each call opens and
+  closes its own MCP session; the default timeout is 30 s.
+- The slot is removed when the plugin unloads; check it is there before each call.
+
 ## OAuth sign-in from a remote daemon
 
 The authorization request uses `redirect_uri=http://127.0.0.1:47824/oauth/callback`, served by the
