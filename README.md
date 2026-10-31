@@ -152,8 +152,8 @@ interface McpProxyApi {
 }
 ```
 
-- The call goes through the proxy's own endpoint with a capability that exists only in the daemon's memory (never on disk nor
-  in an agent's environment), so the stored credential, the OAuth refresh and replay, `allowTools` and the audit log apply as for
+- The call goes through the proxy's own endpoint with a capability that exists only in the daemon (its memory and the 0600
+  endpoint file below, never in an agent's environment), so the stored credential, the OAuth refresh and replay, `allowTools` and the audit log apply as for
   agents. The audit names the caller `plugin:<caller>`.
 - Every registered server is reachable this way, `explicitOnly` ones included: a plugin runs in the daemon and could read the
   secrets file anyway.
@@ -161,6 +161,11 @@ interface McpProxyApi {
   running, the server is unknown, needs a sign-in or key, cannot be reached, or answers a JSON-RPC error. Each call opens and
   closes its own MCP session; the default timeout is 30 s.
 - The slot is removed when the plugin unloads; check it is there before each call.
+- Paseo runs each plugin in its own Node process, so the slot only exists in MCP Proxy's own. A plugin in another process reads
+  `~/.paseo/mcp-proxy/endpoint.json` (`MCP_PROXY_ENDPOINT_FILE` overrides the path), written 0600 when the endpoint starts and
+  removed on unload: `{ "url": "http://127.0.0.1:<port>", "token": "...", "apiVersion": 1 }`. It speaks MCP (streamable HTTP) to
+  `<url>/s/<server>/mcp` with `Authorization: Bearer <token>` and `x-paseo-plugin: <caller>`, exactly what `callTool` does. The
+  URL is always loopback; read the file again on a 401 or a refused connection (the token changes at each MCP Proxy restart).
 
 ## OAuth sign-in from a remote daemon
 
