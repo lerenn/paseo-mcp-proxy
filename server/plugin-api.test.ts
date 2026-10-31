@@ -1,7 +1,8 @@
+import { readFileSync, statSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuditLog } from "./audit";
-import { createPluginApi, PLUGIN_API_KEY, PluginCapability, registerPluginApi } from "./plugin-api";
+import { createPluginApi, ENDPOINT_API_VERSION, PLUGIN_API_KEY, PluginCapability, registerPluginApi, writeEndpointFile } from "./plugin-api";
 import { ProxyHttp } from "./proxy";
 import { PendingStore } from "./pending";
 import { ProxyService } from "./service";
@@ -110,5 +111,43 @@ describe("plugin API", () => {
     registerPluginApi(b, target);
     dropA();
     expect(target[PLUGIN_API_KEY]).toBe(b);
+  });
+});
+
+describe("plugin endpoint file", () => {
+  it("writes {url, token, apiVersion} 0600 in a 0700 directory, and the token works on the endpoint", async () => {
+    const up = await upstream();
+    const { plugins, base } = await setup(up.url);
+    const file = path.join(tmp(), "mcp-proxy", "endpoint.json");
+    writeEndpointFile(base, plugins, file);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    const endpoint = JSON.parse(readFileSync(file, "utf8"));
+    expect(endpoint).toEqual({ url: base, token: plugins.token, apiVersion: ENDPOINT_API_VERSION });
+    // A plugin in another process calls a tool with what the file says.
+    const out = await createPluginApi(() => endpoint.url, Object.assign(new PluginCapability(), { token: endpoint.token })).callTool("gh", "pr_facts", { url: "u" }, { caller: "pr-facts" });
+    expect(out.content![0].text).toBe('{"url":"u"}');
+  });
+
+  it("refuses a non-loopback URL", () => {
+    const file = path.join(tmp(), "endpoint.json");
+    expect(() => writeEndpointFile("http://10.0.0.5:47824", new PluginCapability(), file)).toThrow(/non-loopback/);
+    expect(() => writeEndpointFile("https://127.0.0.1:47824", new PluginCapability(), file)).toThrow(/non-loopback/);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("the cleanup removes the file only while it is still this capability's", () => {
+    const file = path.join(tmp(), "endpoint.json");
+    const a = new PluginCapability();
+    const b = new PluginCapability();
+    const dropA = writeEndpointFile("http://127.0.0.1:1", a, file);
+    const dropB = writeEndpointFile("http://127.0.0.1:2", b, file);
+    dropA();
+    expect(JSON.parse(readFileSync(file, "utf8")).token).toBe(b.token);
+    dropB();
+    expect(existsSync(file)).toBe(false);
+    writeFileSync(file, "not json");
+    dropB();
+    expect(existsSync(file)).toBe(true);
   });
 });

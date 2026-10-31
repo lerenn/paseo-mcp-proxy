@@ -1,10 +1,13 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { timeout } from "./files";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
+import { home, timeout, writeJson } from "./files";
 import type { AgentSession } from "./sessions";
 
 /**
  * The in-process API other daemon plugins use to call a registered server's tools. Plugins do not import each other, so it is
- * offered on `globalThis[Symbol.for("paseo.mcp-proxy")]`; callers repeat the `McpProxyApi` shape below.
+ * offered on `globalThis[Symbol.for("paseo.mcp-proxy")]`; callers repeat the `McpProxyApi` shape below. Paseo runs each plugin in
+ * its own process, so the slot only serves code in this one: other plugins read the endpoint file (`writeEndpointFile`) instead.
  */
 export const PLUGIN_API_KEY = Symbol.for("paseo.mcp-proxy");
 
@@ -35,8 +38,9 @@ export interface McpProxyApi {
 }
 
 /**
- * A capability that exists only in this process, never on disk or in an agent's environment. The endpoint accepts it for every
- * registered server, explicitOnly ones included: a plugin runs in the daemon and could already read the secrets file.
+ * The plugins' capability: in this process and in the daemon user's 0600 endpoint file, never in an agent's environment. The
+ * endpoint accepts it for every registered server, explicitOnly ones included: a plugin runs in the daemon and could already read
+ * the secrets file.
  */
 export class PluginCapability {
   readonly token = randomBytes(24).toString("base64url");
@@ -135,5 +139,36 @@ export function registerPluginApi(api: McpProxyApi, target: Record<symbol, unkno
   target[PLUGIN_API_KEY] = api;
   return () => {
     if (target[PLUGIN_API_KEY] === api) delete target[PLUGIN_API_KEY];
+  };
+}
+
+/** Version of the endpoint file's contract: MCP over `<url>/s/<server>/mcp`, `Bearer <token>`, caller in `x-paseo-plugin`. */
+export const ENDPOINT_API_VERSION = 1;
+
+export interface PluginEndpoint {
+  url: string;
+  token: string;
+  apiVersion: number;
+}
+
+/** Where other plugins (each in its own process) find the plugin capability. */
+export const endpointFile = () => process.env.MCP_PROXY_ENDPOINT_FILE ?? path.join(home(), "endpoint.json");
+
+const LOOPBACK = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/;
+
+/**
+ * Write `{url, token, apiVersion}` for plugins in other processes, readable only by the daemon's user (file 0600, directory 0700),
+ * like the Factory's and Agents Mail's endpoint files. Loopback URLs only. The cleanup removes the file only while it is still
+ * this capability's (a newer copy of the plugin may have written its own).
+ */
+export function writeEndpointFile(url: string, capability: PluginCapability, file = endpointFile()): () => void {
+  if (!LOOPBACK.test(url)) throw new Error(`MCP Proxy: refusing to publish a non-loopback endpoint (${url})`);
+  writeJson(file, { url, token: capability.token, apiVersion: ENDPOINT_API_VERSION } satisfies PluginEndpoint);
+  return () => {
+    try {
+      if ((JSON.parse(readFileSync(file, "utf8")) as Partial<PluginEndpoint>).token === capability.token) rmSync(file, { force: true });
+    } catch {
+      // gone or unreadable: nothing of ours to remove
+    }
   };
 }

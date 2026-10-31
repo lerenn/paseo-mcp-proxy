@@ -3,7 +3,7 @@ import { AuditLog } from "./server/audit";
 import { GitSources } from "./server/git-sync";
 import { GitRegistry } from "./server/registry";
 import { attachServers } from "./server/attach";
-import { createPluginApi, PluginCapability, registerPluginApi } from "./server/plugin-api";
+import { createPluginApi, PluginCapability, registerPluginApi, writeEndpointFile } from "./server/plugin-api";
 import { ProxyHttp } from "./server/proxy";
 import { ProxyService } from "./server/service";
 import { SessionStore } from "./server/sessions";
@@ -54,9 +54,16 @@ export default function contribute(server: PluginServerContext) {
 
   // Resumed agents keep the URL they were created with, so the port has to be stable.
   const port = Number(process.env.MCP_PROXY_PORT ?? DEFAULT_PORT);
+  let removeEndpointFile = () => {};
   const started = http.start(port).then(
     (u) => {
       url = u;
+      // Other plugins run in their own process: they find the plugin capability in a 0600 file, not on globalThis.
+      try {
+        removeEndpointFile = writeEndpointFile(u, plugins);
+      } catch (error) {
+        console.error("mcp-proxy: could not write the endpoint file", error);
+      }
     },
     (err: Error) => {
       startError = `mcp-proxy cannot listen on 127.0.0.1:${port}: ${err.message}. Set MCP_PROXY_PORT on the daemon.`;
@@ -104,6 +111,7 @@ export default function contribute(server: PluginServerContext) {
 
   return async () => {
     unregisterApi();
+    removeEndpointFile();
     removeCreate();
     removeOpen();
     removeArchived();
